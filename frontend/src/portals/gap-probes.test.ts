@@ -43,12 +43,17 @@ describe('ADMIN-MENU · the admin console shows the specified menus and submenus
       '#Role Management', 'Component', 'Sub Component', 'Branch', 'Department', 'Role', 'Approvals']);
   });
   it('menu points without a feature yet land on the placeholder and are still gated', () => {
+<<<<<<< Updated upstream
     for (const label of ['Component', 'Sub Component', 'Branch', 'Department']) {
+=======
+    for (const label of ['Customer', 'Component', 'Sub Component', 'Branch', 'Department']) {
+>>>>>>> Stashed changes
       const item = menuFor('platform').find((i) => i.label === label);
       expect(item?.widgets).toEqual(['menu.placeholder']);
       expect(item?.perm.length).toBeGreaterThan(0);
     }
   });
+<<<<<<< Updated upstream
   it('Customer is the KYC plugin\'s customer widget (register → customer activates → checker activates), on both portals', () => {
     const platform = menuFor('platform').find((i) => i.label === 'Customer');
     expect(platform?.widgets).toEqual(['kyc.customers']);
@@ -56,6 +61,13 @@ describe('ADMIN-MENU · the admin console shows the specified menus and submenus
     const org = menuFor('org').find((i) => i.id === 'kyc-customers');
     expect(org?.widgets).toEqual(['kyc.customers']);
     expect(org?.group).toBe('KYC');
+=======
+  it('Reset Password uses the registered users widget in reset mode', () => {
+    const reset = menuFor('platform').find((i) => i.label === 'Reset Password');
+    expect(reset?.link).toBe('/reset-password');
+    expect(reset?.widgets).toEqual(['users.resetpassword']);
+    expect(reset?.config?.['users.resetpassword']).toEqual({ scope: 'own', mode: 'reset' });
+>>>>>>> Stashed changes
   });
   it('organization screen is the org directory with KYC status + "New onboarding" (KYC form), gated by its keys', () => {
     const org = menuFor('platform').find((i) => i.label === 'Organization');

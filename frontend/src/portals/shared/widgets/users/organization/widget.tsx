@@ -47,6 +47,7 @@ export function UsersOrganization(props: WidgetRuntimeProps<UsersOrganizationCon
   // "own": the signed-in org, or the org being acted as (the host swaps context.orgId).
   // "selected": the org picked on this screen (?org=); while acting, the acted-as org is the default.
   const scope = props.config?.scope ?? 'own';
+  const resetMode = props.config?.mode === 'reset';
   const workingOrg = context.orgId ?? '';
   const picked = scope === 'selected' ? (context.selection.orgId ?? (session.actAs ? workingOrg : '')) : '';
   const orgId = scope === 'selected' ? picked : workingOrg;
@@ -191,6 +192,11 @@ export function UsersOrganization(props: WidgetRuntimeProps<UsersOrganizationCon
       say('ok', `Deactivation of ${saved.fullName} requested — awaiting a checker.`),
     );
 
+  const passwordReset = (u: UserRow) =>
+    run({ kind: 'password-reset', user: u }, (saved) =>
+      say('ok', `Password reset for ${saved.fullName} requested — a checker must approve it before the reset link is sent.`),
+    );
+
   const remove = (u: UserRow) =>
     run({ kind: 'remove', user: u }, (saved) => {
       say('ok', `Removal of ${saved.fullName} requested — awaiting a checker.`);
@@ -282,10 +288,10 @@ export function UsersOrganization(props: WidgetRuntimeProps<UsersOrganizationCon
     <div ref={topRef} className="min-w-0 scroll-mt-4">
     <Panel className="min-w-0 p-4 sm:p-5">
       <PageHeader
-        title="Users"
-        subtitle={summary}
+        title={resetMode ? 'Reset password' : 'Users'}
+        subtitle={resetMode ? `${summary} · Select a user to request a reset` : summary}
         actions={
-          readOnly ? (
+          resetMode ? undefined : readOnly ? (
             maySudo ? (
               <Button variant="primary" data-action="act-as" onClick={() => void actAs()} disabled={startingActAs} aria-busy={startingActAs}>
                 {startingActAs ? 'Starting…' : `Act as ${orgName} admin`}
@@ -382,9 +388,11 @@ export function UsersOrganization(props: WidgetRuntimeProps<UsersOrganizationCon
               onEdit={() => { cmd.reset(); patch({ edit: '1' }); }}
               onDeactivate={() => deactivate(openUser)}
               onActivate={() => activate(openUser)}
+              onPasswordReset={() => passwordReset(openUser)}
               onRemove={() => remove(openUser)}
               onResend={() => resend(openUser)}
               onReload={reload}
+              resetOnly={resetMode}
               readOnly={readOnly}
             />
           )}

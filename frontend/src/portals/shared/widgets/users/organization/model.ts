@@ -212,8 +212,13 @@ export type UserCommand =
   | { kind: 'update'; user: UserRow; values: UserFormValues; rolesEditable: boolean }
   | { kind: 'deactivate'; user: UserRow }
   | { kind: 'activate'; user: UserRow }
+<<<<<<< Updated upstream
   | { kind: 'remove'; user: UserRow }
   | { kind: 'resend'; user: UserRow };
+=======
+  | { kind: 'password-reset'; user: UserRow }
+  | { kind: 'remove'; user: UserRow };
+>>>>>>> Stashed changes
 
 const blankToEmpty = (v: string) => v.trim();
 
@@ -259,9 +264,18 @@ export function useUserCommand(port: WidgetDataPortLike, orgId: string) {
           return port.command<UserRow>('user.deactivate', { expectedVersion: cmd.user.version }, { ...base, personId: cmd.user.id });
         case 'activate':
           return port.command<UserRow>('user.activate', { expectedVersion: cmd.user.version }, { ...base, personId: cmd.user.id });
+<<<<<<< Updated upstream
         case 'resend':
           // acknowledgement only ({personId, channel}) — the list re-sync shows nothing new
           return port.command<UserRow>('user.activation.resend', {}, { ...base, personId: cmd.user.id });
+=======
+        case 'password-reset':
+          return port.command<UserRow>(
+            'user.password-reset',
+            { expectedVersion: cmd.user.version },
+            { ...base, personId: cmd.user.id },
+          );
+>>>>>>> Stashed changes
         case 'remove':
           return port.command<UserRow>('user.remove', undefined, {
             ...base,

@@ -43,7 +43,7 @@ $CLI = Resolve-CLI
 # Engine-VM sizing that leaves the HOST enough RAM to also run the five JVM services.
 #   <= 9  GB total  ->  2 GB / 2 vCPU   (8 GB laptops: only postgres + tigerbeetle in the VM,
 #                                        run services natively with scripts\dev-windows.ps1 dev)
-#   <= 17 GB total  ->  5 GB / 2 vCPU   (16 GB laptops — comfortable, 'stack-up' fits)
+#   <= 17 GB total  ->  5 GB / 2 vCPU   (16 GB laptops - comfortable, 'stack-up' fits)
 #   >  17 GB total  ->  6 GB / 3 vCPU   (workstation)
 function Get-FspSizing {
     $total = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
@@ -55,10 +55,25 @@ function Get-FspSizing {
 function Invoke-Compose {
     param([string[]] $ArgsCompose)
     if ($CLI -eq 'podman') {
-        if (Get-Command docker-compose -ErrorAction SilentlyContinue) {
-            docker-compose -f $COMPOSE @ArgsCompose
+        $composeProvider = Join-Path $env:LOCALAPPDATA 'FSP\bin\docker-compose.exe'
+        if (Test-Path $composeProvider) {
+            $previousProvider = $env:PODMAN_COMPOSE_PROVIDER
+            try {
+                $env:PODMAN_COMPOSE_PROVIDER = $composeProvider
+                podman compose -f $COMPOSE @ArgsCompose
+            } finally {
+                $env:PODMAN_COMPOSE_PROVIDER = $previousProvider
+            }
+        } elseif (Get-Command podman-compose -ErrorAction SilentlyContinue) {
+            $previousProvider = $env:PODMAN_COMPOSE_PROVIDER
+            try {
+                $env:PODMAN_COMPOSE_PROVIDER = (Get-Command podman-compose).Source
+                podman compose -f $COMPOSE @ArgsCompose
+            } finally {
+                $env:PODMAN_COMPOSE_PROVIDER = $previousProvider
+            }
         } else {
-            podman compose -f $COMPOSE @ArgsCompose
+            throw "Podman Compose provider not found. Run scripts\windows-setup.ps1 or install podman-compose."
         }
     } else {
         docker compose -f $COMPOSE @ArgsCompose
@@ -67,26 +82,28 @@ function Invoke-Compose {
 
 switch ($Command) {
     'help' {
-        Write-Host "FSP dev on Windows — make-equivalents (engine: $CLI)" -ForegroundColor Magenta
-        Write-Host @"
-  status          engine + port overview
-  infra-up        start PostgreSQL (container)
-  infra-down      stop PostgreSQL
-  tb-init         format TigerBeetle data file (container, seccomp unconfined)
-  tb-start        start TigerBeetle 0.17.9 on 127.0.0.1:3000 (container)
-  tb-stop         stop TigerBeetle container
-  tb-reset        wipe TigerBeetle data
-  stack-up        build + run core/idp/gateway/bff in containers
-  stack-down      stop the container stack
-  pki             regenerate dev PKI (bash -> Git for Windows)
-  docs-refresh    regenerate docs/generated artifacts
-  docs-check      fail if docs artifacts are stale (CI gate)
-  dev             ONE COMMAND: engine + postgres + tigerbeetle + idp/core/gateway/bff
-                  (+kyc plugin) + SPA, each in its own terminal window
-  stop            reverse of dev: stop SPA daemons, services, tigerbeetle, postgres
-  tune            resize the engine VM (sufficient: 5 GB RAM / 2 vCPU;
-                  pass -MemoryMB / -Cpus to override)
-"@; break
+        Write-Host "FSP dev on Windows - make-equivalents (engine: $CLI)" -ForegroundColor Magenta
+        $help = @(
+            '  status          engine + port overview',
+            '  infra-up        start PostgreSQL (container)',
+            '  infra-down      stop PostgreSQL',
+            '  tb-init         format TigerBeetle data file (container, seccomp unconfined)',
+            '  tb-start        start TigerBeetle 0.17.9 on 127.0.0.1:3000 (container)',
+            '  tb-stop         stop TigerBeetle container',
+            '  tb-reset        wipe TigerBeetle data',
+            '  stack-up        build + run core/idp/gateway/bff in containers',
+            '  stack-down      stop the container stack',
+            '  pki             regenerate dev PKI (bash -> Git for Windows)',
+            '  docs-refresh    regenerate docs/generated artifacts',
+            '  docs-check      fail if docs artifacts are stale (CI gate)',
+            '  dev             ONE COMMAND: engine + postgres + tigerbeetle + idp/core/gateway/bff',
+            '                  (+kyc plugin) + SPA, each in its own terminal window',
+            '  stop            reverse of dev: stop SPA daemons, services, tigerbeetle, postgres',
+            '  tune            resize the engine VM (sufficient: 5 GB RAM / 2 vCPU;',
+            '                  pass -MemoryMB / -Cpus to override)'
+        )
+        Write-Host ($help -join [Environment]::NewLine)
+        break
     }
 
     'status' {
@@ -111,12 +128,16 @@ switch ($Command) {
     'infra-init' { New-Item -ItemType Directory -Force -Path $TB_DATA | Out-Null; break }
 
     'tb-init' {
+        $oldPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         & $CLI run --rm --user 0:0 `
             --security-opt seccomp=unconfined `
             -v "${TB_DATA}:/data" `
             --entrypoint /tigerbeetle $TB_IMAGE `
             format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle 2>$null
-        if ($LASTEXITCODE -ne 0) { Write-Host "[warn] format skipped/failed (exit $LASTEXITCODE) — usually 'already formatted'" -ForegroundColor DarkYellow }
+        $formatExit = $LASTEXITCODE
+        $ErrorActionPreference = $oldPref
+        if ($formatExit -ne 0) { Write-Host "[warn] format skipped/failed (exit $formatExit) - usually 'already formatted'" -ForegroundColor DarkYellow }
         break
     }
 
@@ -151,7 +172,7 @@ switch ($Command) {
         Remove-Item $TB_DATA -Recurse -Force -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Force -Path $TB_DATA | Out-Null
         & $PSScriptRoot\dev-windows.ps1 tb-init
-        Write-Host "[ ok  ] TigerBeetle data reset — run dev-windows.ps1 tb-start"
+        Write-Host "[ ok  ] TigerBeetle data reset - run dev-windows.ps1 tb-start"
         break
     }
 
@@ -164,7 +185,7 @@ switch ($Command) {
 
     'pki' {
         $bashExe = "${env:ProgramFiles}\Git\bin\bash.exe"
-        if (-not (Test-Path $bashExe)) { throw "Git Bash not found — install Git for Windows (scripts\windows-setup.ps1 does it)." }
+        if (-not (Test-Path $bashExe)) { throw "Git Bash not found - install Git for Windows (scripts\windows-setup.ps1 does it)." }
         & $bashExe -lc "cd '$ROOT' && bash infrastructure/pki/dev-pki.sh"
         Write-Host "[ ok  ] dev PKI regenerated (gitignored)"
         break
@@ -197,10 +218,10 @@ switch ($Command) {
                 $json = Get-Content $rd -Raw | ConvertFrom-Json
                 $json | Add-Member -NotePropertyName 'virtualMachine' -NotePropertyValue @{ memoryInGB = [math]::Ceiling($size.MB / 1024.0); numberCPUs = $size.Cpu } -Force
                 $json | ConvertTo-Json -Depth 10 | Set-Content $rd -Encoding utf8
-                Write-Host "[ ok  ] wrote $($size.MB) MB / $($size.Cpu) vCPU to settings.json — RESTART Rancher Desktop to apply"
+                Write-Host "[ ok  ] wrote $($size.MB) MB / $($size.Cpu) vCPU to settings.json - RESTART Rancher Desktop to apply"
                 Write-Host "         (or use its UI: Preferences > Virtual Machine > Memory (GB) / Number CPUs)"
             } else {
-                Write-Warning "Rancher settings.json not found — use the UI: Preferences > Virtual Machine"
+                Write-Warning "Rancher settings.json not found - use the UI: Preferences > Virtual Machine"
             }
         }
         break
@@ -236,8 +257,8 @@ switch ($Command) {
     }
 
     'stop' {
-        # Reverse of 'dev' — gradle daemons, SPA dev server, TB, postgres.
-        # One gradlew for the whole backend (see Makefile: cd backend/<svc> && ../gradlew) —
+        # Reverse of 'dev' - gradle daemons, SPA dev server, TB, postgres.
+        # One gradlew for the whole backend (see Makefile: cd backend/<svc> && ../gradlew) -
         # `gradlew --stop` stops all daemons of this gradle installation.
         & (Join-Path $ROOT 'backend\gradlew.bat') --stop 2>$null | Out-Null
         # SPA: find the vite dev server on :5173 and stop the owning process tree
@@ -250,7 +271,7 @@ switch ($Command) {
         }
         & $PSScriptRoot\dev-windows.ps1 tb-stop
         & $PSScriptRoot\dev-windows.ps1 infra-down
-        Write-Host "[ ok  ] everything stopped — scripts\dev-windows.ps1 dev to bring it all back"
+        Write-Host "[ ok  ] everything stopped - scripts\dev-windows.ps1 dev to bring it all back"
         break
     }
 }

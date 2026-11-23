@@ -1,0 +1,7 @@
+{
+  "id": "org.users",
+  "label": "Organization users",
+  "summary": "List users in the current organization with their roles and status.",
+  "sha": "b4d0043ec0fcb28b09cabd313aa238f16d19561c67f1fd267bc3f6318a202b53",
+  "stagedAt": "2026-11-19T16:57:09.103Z"
+}

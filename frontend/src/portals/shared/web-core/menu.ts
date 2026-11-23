@@ -22,7 +22,11 @@ export type MenuWidget =
   | 'onboard.psp' | 'onboard.list'
   | 'approvals.queue' | 'journal.entry' | 'audit.trail'
   | 'rbac.matrix' | 'permissions.catalogue' | 'plugins.governance'
+<<<<<<< Updated upstream
   | 'users.organization' | 'users.reset'
+=======
+  | 'users.organization' | 'users.resetpassword'
+>>>>>>> Stashed changes
   | 'ledger.accounts' | 'period.control' | 'bank.accounts'
   | 'overview.tiles'
   | 'inventory.placeholder'
@@ -55,6 +59,7 @@ export const MENU_ITEMS: MenuItem[] = [
   // ================= platform (admin console) — the admin sidebar spec, menu for menu:
   //   User Management → Back Office User, Reset Password, Customer, Organization
   //   Role Management → Component, Sub Component, Branch, Department, Role
+<<<<<<< Updated upstream
   // plus Approvals (user and role changes are four-eyes and are decided only there). No separate
   // Onboarding menu here: Organization is the org directory AND its "New onboarding" entry.
   // Component / Sub Component / Branch / Department have no feature
@@ -64,6 +69,16 @@ export const MENU_ITEMS: MenuItem[] = [
   { id: 'reset-password', label: 'Reset Password', icon: '⚷', link: '/reset-password',
     perm: ['user.manage'], portals: ['platform'], group: 'User Management', widgets: ['users.reset'] },
   // customer KYC (the KYC plugin's widget): register → customer activates → checker activates
+=======
+  // plus Onboarding and Approvals (user and role changes are four-eyes and are decided only there).
+  // Customer / Component / Sub Component / Branch / Department have no feature behind them yet:
+  // they land on menu.placeholder, gated by the key their feature will need.
+  { id: 'back-office-users', label: 'Back Office User', icon: '☰', link: '/users',
+    perm: ['user.manage'], portals: ['platform'], group: 'User Management', widgets: ['users.organization'] },
+  { id: 'reset-password', label: 'Reset Password', icon: '⚷', link: '/reset-password',
+    perm: ['user.manage'], portals: ['platform'], group: 'User Management', widgets: ['users.resetpassword'],
+    config: { 'users.resetpassword': { scope: 'own', mode: 'reset' } } },
+>>>>>>> Stashed changes
   { id: 'customers', label: 'Customer', icon: '☺', link: '/customers',
     perm: ['kyc.review'], portals: ['platform'], group: 'User Management', widgets: ['kyc.customers'] },
   // the organization directory: every org below the platform with its status + KYC standing

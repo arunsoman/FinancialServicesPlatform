@@ -86,6 +86,7 @@ export const COMMANDS: DataSources = {
   'user.update':     { '*': { method: 'PATCH', path: '/api/tenants/{tenantId}/users/{personId}' } },
   'user.deactivate': { '*': { method: 'POST', path: '/api/tenants/{tenantId}/users/{personId}/deactivate' } },
   'user.activate':   { '*': { method: 'POST', path: '/api/tenants/{tenantId}/users/{personId}/activate' } },
+  'user.password-reset': { '*': { method: 'POST', path: '/api/tenants/{tenantId}/users/{personId}/password-reset-request' } },
   'user.remove':     { '*': { method: 'DELETE', path: '/api/tenants/{tenantId}/users/{personId}?expectedVersion={expectedVersion}' } },
   'user.activation.resend': { '*': { method: 'POST', path: '/api/tenants/{tenantId}/users/{personId}/activation' } },
   'user.password.reset.request': { '*': { method: 'POST', path: '/api/tenants/{tenantId}/users/{personId}/password-reset-request' } },

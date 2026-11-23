@@ -15,23 +15,35 @@ export interface UserDetailsProps {
   onEdit: () => void;
   onDeactivate: () => void;
   onActivate: () => void;
+  onPasswordReset: () => void;
   onRemove: () => void;
   /** re-send the IdP activation (approved users who haven't set a password yet) */
   onResend: () => void;
   onReload: () => void;
+  resetOnly?: boolean;
   /** viewing another org without acting as it: show the record, offer no lifecycle action */
   readOnly?: boolean;
 }
 
+<<<<<<< Updated upstream
 type Pending = 'deactivate' | 'remove' | 'resend' | null;
 
 /** Read-only view of one user + every lifecycle action available from its current state. */
 export function UserDetails({
   user, isMe, busy, problem, onEdit, onDeactivate, onActivate, onRemove, onResend, onReload, readOnly = false,
+=======
+type Pending = 'deactivate' | 'password-reset' | 'remove' | null;
+
+/** Read-only view of one user + every lifecycle action available from its current state. */
+export function UserDetails({
+  user, isMe, busy, problem, onEdit, onDeactivate, onActivate, onPasswordReset, onRemove, onReload,
+  readOnly = false, resetOnly = false,
+>>>>>>> Stashed changes
 }: UserDetailsProps) {
   const [pending, setPending] = useState<Pending>(null);
   const removed = user.status === 'ARCHIVED';
-  const selfReason = 'You can’t deactivate or remove your own account.';
+  const selfReason = 'You can’t deactivate, reset, or remove your own account.';
+  const resetUnavailable = isMe || user.status === 'PENDING' || removed;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -164,37 +176,77 @@ export function UserDetails({
             This can’t be undone. The user loses access permanently; their record stays in the audit trail. To pause access instead, deactivate them.
           </InlineConfirm>
         )}
+        {pending === 'password-reset' && (
+          <InlineConfirm
+            title={`Reset password for ${user.fullName}?`}
+            confirmLabel="Request reset"
+            tone="primary"
+            busy={busy}
+            onCancel={() => setPending(null)}
+            onConfirm={() => {
+              onPasswordReset();
+              setPending(null);
+            }}
+          >
+            This opens a four-eyes approval. Only after another authorized person approves will the IdP send a reset link to the user.
+          </InlineConfirm>
+        )}
       </div>
 
       {!removed && !readOnly && (
         <div className="flex flex-wrap items-center gap-2 border-t border-line p-4">
-          <Button variant="primary" onClick={onEdit} disabled={busy}>
-            Edit
-          </Button>
-          {user.status === 'ACTIVE' ? (
-            <Button
-              variant="ghost"
-              disabled={busy || isMe}
-              title={isMe ? selfReason : undefined}
-              onClick={() => setPending('deactivate')}
-            >
-              Deactivate
-            </Button>
-          ) : (
-            <Button variant="ghost" disabled={busy || isMe} onClick={onActivate} aria-busy={busy}>
-              {busy ? 'Activating…' : 'Activate'}
-            </Button>
+          {!resetOnly && (
+            <>
+              <Button variant="primary" onClick={onEdit} disabled={busy}>
+                Edit
+              </Button>
+              {user.status === 'ACTIVE' ? (
+                <Button
+                  variant="ghost"
+                  disabled={busy || isMe}
+                  title={isMe ? selfReason : undefined}
+                  onClick={() => setPending('deactivate')}
+                >
+                  Deactivate
+                </Button>
+              ) : (
+                <Button variant="ghost" disabled={busy || isMe} onClick={onActivate} aria-busy={busy}>
+                  {busy ? 'Activating…' : 'Activate'}
+                </Button>
+              )}
+            </>
           )}
-          <span className="flex-1" />
           <Button
-            variant="danger"
-            disabled={busy || isMe}
-            title={isMe ? selfReason : undefined}
-            onClick={() => setPending('remove')}
+            variant="ghost"
+            data-action="user.password-reset"
+            disabled={busy || resetUnavailable}
+            title={
+              isMe
+                ? selfReason
+                : user.status === 'PENDING'
+                  ? 'Resolve the pending approval before resetting this password.'
+                  : removed
+                    ? 'Removed users cannot receive a password reset.'
+                    : undefined
+            }
+            onClick={() => setPending('password-reset')}
           >
-            Remove
+            Reset password
           </Button>
-          {isMe && <p className="text-dim w-full text-[12px]">{selfReason}</p>}
+          {!resetOnly && (
+            <>
+              <span className="flex-1" />
+              <Button
+                variant="danger"
+                disabled={busy || isMe}
+                title={isMe ? selfReason : undefined}
+                onClick={() => setPending('remove')}
+              >
+                Remove
+              </Button>
+              {isMe && <p className="text-dim w-full text-[12px]">{selfReason}</p>}
+            </>
+          )}
         </div>
       )}
     </div>
