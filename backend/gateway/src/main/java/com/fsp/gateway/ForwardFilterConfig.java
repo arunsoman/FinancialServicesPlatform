@@ -55,9 +55,10 @@ public class ForwardFilterConfig {
     public FilterRegistrationBean<ForwardFilter> forwardFilter(GatewayProperties props,
                                                                CatalogRouteTable catalog,
                                                                JwksHolder jwks,
-                                                               com.fsp.shared.ActorAssertion assertions) {
+                                                               com.fsp.shared.ActorAssertion assertions,
+                                                               BrowserRateLimiter rateLimiter) {
         FilterRegistrationBean<ForwardFilter> reg =
-            new FilterRegistrationBean<>(new ForwardFilter(props, catalog, jwks, assertions));
+            new FilterRegistrationBean<>(new ForwardFilter(props, catalog, jwks, assertions, rateLimiter));
         reg.addUrlPatterns("/v1/*", "/idp/*");
         reg.setOrder(1);
         reg.setDispatcherTypes(DispatcherType.REQUEST);
@@ -82,16 +83,18 @@ public class ForwardFilterConfig {
         private final CatalogRouteTable catalog;
         private final JwksHolder jwks;
         private final org.springframework.web.client.RestClient rest;
+        private final BrowserRateLimiter rateLimiter;
         private final java.util.concurrent.ConcurrentHashMap<String, Long> dpopReplayCache = new java.util.concurrent.ConcurrentHashMap<>();
         private final ObjectMapper mapper = new ObjectMapper();
         private final com.fsp.shared.ActorAssertion assertions;
 
         public ForwardFilter(GatewayProperties props, CatalogRouteTable catalog, JwksHolder jwks,
-                             com.fsp.shared.ActorAssertion assertions) {
+                             com.fsp.shared.ActorAssertion assertions, BrowserRateLimiter rateLimiter) {
             this.props = props;
             this.catalog = catalog;
             this.jwks = jwks;
             this.assertions = assertions;
+            this.rateLimiter = rateLimiter;
             this.rest = org.springframework.web.client.RestClient.create();
         }
 
@@ -100,6 +103,18 @@ public class ForwardFilterConfig {
                                         FilterChain chain) throws ServletException, IOException {
             try {
                 MDC.put("traceId", UUID.randomUUID().toString());
+                // Edge rate limit per browser/client — reject burst before any token
+                // validation or authorization decision (defense-in-depth, not a FAPI spacing rule).
+                var verdict = rateLimiter.check(clientKey(request));
+                if (!verdict.allowed()) {
+                    log.warn("gateway_rate_limited path={} retryAfterMs={}",
+                        request.getRequestURI(), verdict.retryAfter().toMillis());
+                    problem(response, 429, "RATE_LIMITED",
+                        "Too many requests; slow down and retry after " + verdict.retryAfter().toMillis() + " ms");
+                    response.setHeader("Retry-After",
+                        String.valueOf(Math.max(1, verdict.retryAfter().toSeconds())));
+                    return;
+                }
                 handle(request, response);
             } catch (Exception e) {
                 log.error("gateway_forward_failure method={} path={} detail={}",
@@ -688,6 +703,21 @@ public class ForwardFilterConfig {
             var claims = jwks.verifier(props.getIssuer()).verify(
                 authorization.substring(7).trim(), jwks.jwks(), props.getIssuer(), props.getAudience());
             return claims == null ? null : claims.userId();
+        }
+
+        /**
+         * Derive a stable, per-browser rate-limit key. The browser holds only the BFF
+         * session cookie (tokens never enter the browser), so the cookie is the best
+         * client handle; fall back to client IP. The value is SHA-256 hashed so the
+         * raw cookie / IP is never stored or logged (AGENTS.md §1.5).
+         */
+        private String clientKey(HttpServletRequest request) {
+            String cookie = request.getHeader("Cookie");
+            String xff = request.getHeader("X-Forwarded-For");
+            String remote = request.getRemoteAddr();
+            String source = (cookie != null && !cookie.isBlank()) ? cookie :
+                (xff != null && !xff.isBlank() ? xff.split(",")[0].trim() : remote);
+            return source == null ? "unknown" : com.fsp.shared.Es256.sha256B64(source);
         }
 
         private byte[] readBody(HttpServletRequest request) throws IOException {

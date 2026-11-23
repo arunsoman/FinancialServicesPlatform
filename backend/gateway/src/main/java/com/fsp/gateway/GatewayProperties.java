@@ -1,5 +1,7 @@
 package com.fsp.gateway;
 
+import java.time.Duration;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "fsp.gateway")
@@ -32,6 +34,17 @@ public final class GatewayProperties {
     /** PKCS#8 PEM with the P-256 key that signs actor assertions (dev: created on first boot). */
     private String assertionKey = "../../infrastructure/pki/dev/gateway-assertion.pem";
     private boolean assertionKeyCreate = true;
+
+    /** Per-client (browser) rate limit at the gateway edge. Defense-in-depth only —
+     *  FAPI 2.0 does not prescribe inter-request spacing (see BrowserRateLimiter). */
+    private RateLimit rateLimit = new RateLimit(true, 1, Duration.ofMillis(250));
+
+    public RateLimit getRateLimit() { return rateLimit; }
+    public void setRateLimit(RateLimit v) { this.rateLimit = v; }
+
+    public record RateLimit(boolean enabled, int maxRequests, Duration window) {
+        public RateLimit { }
+    }
 
     public String getCoreBaseUrl() { return coreBaseUrl; }
     public void setCoreBaseUrl(String v) { this.coreBaseUrl = v; }
