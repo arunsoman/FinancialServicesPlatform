@@ -2,7 +2,7 @@
  * A screen of the published, signature-verified layout (/p/:menuId/:screenId — SME
  * LayoutPage). Guards in the same order as coded screens: session → eligibility → the
  * screen must show at least one widget the user may see. Each placed widget renders only
- * if this build has it AND the signed bundle approved it (signed-layout placedDef), and
+ * if this build has it AND the published menus list it (signed-layout placedDef), and
  * its host still gates on the user's permissions; core re-checks every call it makes.
  */
 import { Navigate, useParams } from 'react-router-dom';

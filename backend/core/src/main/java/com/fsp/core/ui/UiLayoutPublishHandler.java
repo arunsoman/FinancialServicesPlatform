@@ -17,8 +17,8 @@ import java.util.UUID;
  * ({@code approval.payload}, taken by {@code PortalLayoutService.submit}); this handler
  * publishes that snapshot — never the current draft row, which a four-eyes-compliant flow
  * cannot mutate while the approval is pending anyway (draft is locked). Publishing is
- * DB-only (layout row + signed bundle), so it is {@link #atomicWithResolution() atomic
- * with the approval resolution}: a bundle failure rolls the decision back instead of
+ * DB-only (the layout row), so it is {@link #atomicWithResolution() atomic
+ * with the approval resolution}: a failure rolls the decision back instead of
  * stranding an APPROVED-but-unpublished layout.</p>
  */
 @Slf4j
@@ -26,13 +26,10 @@ import java.util.UUID;
 public class UiLayoutPublishHandler implements ApprovalHandler {
 
     private final UiLayoutRepository layouts;
-    private final UiBundleService bundles;
     private final LayoutValidator validator;
 
-    public UiLayoutPublishHandler(UiLayoutRepository layouts, UiBundleService bundles,
-                                  LayoutValidator validator) {
+    public UiLayoutPublishHandler(UiLayoutRepository layouts, LayoutValidator validator) {
         this.layouts = layouts;
-        this.bundles = bundles;
         this.validator = validator;
     }
 
@@ -41,7 +38,7 @@ public class UiLayoutPublishHandler implements ApprovalHandler {
         return ApprovalRequest.OpType.UI_LAYOUT_PUBLISH;
     }
 
-    /** DB-only effect (layout row + signed bundle) — must commit or roll back WITH the approval row. */
+    /** DB-only effect (the layout row) — must commit or roll back WITH the approval row. */
     @Override
     public boolean atomicWithResolution() {
         return true;
@@ -88,10 +85,6 @@ public class UiLayoutPublishHandler implements ApprovalHandler {
         live.publishedApprovalId = approval.id;
         live.updatedAt = Instant.now();
         layouts.save(live);
-        // Sign-on-publish (plans/signed-portal-delivery-plan.md S1): the delivery bundle is
-        // minted in the SAME transaction as the publish — and, with atomicWithResolution
-        // above, in the same transaction as the approval decision itself.
-        bundles.generate(live.portal);
         log.info("ui_layout_published portal={} layoutId={} approvalId={} checker={}",
             live.portal, live.id, approval.id, checker.username());
     }

@@ -150,8 +150,8 @@ Then record where the portal lane finds it — the one part of the stage file yo
 "screen": { "portalPath": "/admin", "screenPath": "/admin/<route>", "user": "platform-admin" }
 ```
 
-Signed portals render the *published* layout: after wiring a new menu point in the builder,
-export it (`make menus-publish`) and restart core (it applies the seed and signs at boot) before
+Portals render the *published* layout: after wiring a new menu point in the builder,
+export it (`make menus-publish`) and restart core (it applies the seed) before
 the portal lane can see it — docs/portal-menus.md. If the stack is down, say so in the review and skip the portal lane.
 
 ## 7. Register — required before review

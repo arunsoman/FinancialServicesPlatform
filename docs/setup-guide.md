@@ -511,7 +511,7 @@ Each row: symptom → root cause → fix. Rung references point to §7's ladder.
 | browser stuck on "loading" overview | session hydration chain hit `AUTH_REQUIRED` → IdP token expired (15 min) → reload to bounce to login |
 | `B AUTH_REQUIRED` loop | cookie blocked (third-party policy) → use `http://localhost:5173` not a LAN IP; SameSite=Lax needs same-site nav |
 | Playwright e2e flaky on cold start | services still booting → wait for smoke ladder L7 green before `bunx --bun playwright test` |
-| portal shows **"UI metadata tampered — this portal will not load"** | signing-key drift (pki re-run, teammate's pinned `trust-store.json`, or no bundle yet) → follow [`docs/ui-metadata-tampered.md`](ui-metadata-tampered.md): `cd frontend && bun run portal:check`, then restart core (it re-signs at boot) |
+| portal shows **"No menu configured"** or **"Couldn’t load the … menus"** | core hasn't applied the menu seed yet, or core/gateway/BFF is down | restart core; bring the stack up; see [`docs/widget-workflow.md`](widget-workflow.md#fixing-menu-problems) |
 | typecheck fails on generated widget types | widget sync drift → `bun run widgets:check` (syncs against core catalog) |
 
 ### 11.7 Windows-only extras

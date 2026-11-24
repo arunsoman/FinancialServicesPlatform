@@ -217,6 +217,11 @@
     {
       "at": "2026-11-24T04:56:35.077Z",
       "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-24T05:47:28.769Z",
+      "event": "e2e-ok",
+      "detail": "workbench+portal live"
     }
   ],
   "requirement": "Invoicing with 30-day credit terms by default and built-in payment options (e-money wallet, bank transfer, card via PSP hosted page), a menu entry in every portal, integrated with core",
@@ -253,12 +258,12 @@
   },
   "e2e": {
     "workbench": {
-      "at": "2026-11-24T04:04:33.257Z",
+      "at": "2026-11-24T05:47:28.769Z",
       "ok": true,
       "uiHash": "41e7d6082ca512c0"
     },
     "portal": {
-      "at": "2026-11-24T04:04:33.257Z",
+      "at": "2026-11-24T05:47:28.769Z",
       "ok": true,
       "uiHash": "41e7d6082ca512c0",
       "live": true

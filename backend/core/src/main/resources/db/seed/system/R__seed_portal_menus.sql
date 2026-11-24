@@ -5,7 +5,7 @@
 -- changes) and the REPO WINS: each portal's PUBLISHED layout and every widget below are set
 -- to exactly this on deploy. The pull request that changes this file is the review.
 --   * maker = platform-admin (system seed V2); no approval row;
---   * core signs the bundles at boot (UiBundleBootSync) with each environment's own key.
+--   * portals read the published layout straight from core; nothing is signed.
 
 -- ===== widgets =====
 INSERT INTO ui_widgets (id, version, label, category, bundle, portals, requires, status, registered_by, bundle_sha256)

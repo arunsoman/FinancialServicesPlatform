@@ -13,7 +13,7 @@ export const TIER_LABEL: Record<Tier, string> = { xs: 'Phone', sm: 'Tablet', md:
 export const PORTAL_CONTEXTS = ['PLATFORM', 'MANUFACTURER', 'DISTRIBUTOR', 'WHOLESALER', 'MERCHANT'] as const;
 export type PortalContext = (typeof PORTAL_CONTEXTS)[number];
 
-/** Builder targets: the portal key layouts + signed bundles are published under (core). */
+/** Builder targets: the portal key layouts are published under (core). */
 export interface BuilderPortal {
   key: string;
   label: string;

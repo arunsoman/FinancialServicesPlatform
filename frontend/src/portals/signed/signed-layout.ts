@@ -1,12 +1,11 @@
 /**
- * The VERIFIED portal layout (plans/signed-portal-delivery-plan.md, builder phase B).
+ * A portal's published menus, as the portal renders them (builder phase B).
  *
- * SignedMenuGate verifies the bundle's ES256 signature against the build-pinned trust
- * store, then parses its payload HERE (zod at the boundary, ui-std §7) — only a payload
- * that verified AND has this exact shape ever reaches the renderer. Nothing in this module
- * fetches: the layout is never read from an unverified source, never cached across users.
+ * SignedMenuGate loads them from core (GET /api/ui/menus/{portal}) and parses the payload HERE
+ * (zod at the boundary, ui-std §7) — only a payload with this exact shape reaches the renderer.
+ * (The "Signed" names are historical: menus are no longer signed; core checks every API call.)
  *
- * Payload (core UiBundleService.canonicalPayload):
+ * Payload (core PortalMenuService.menu):
  *   { portal, schemaVersion, layoutVersion, publishedAt,
  *     menus:[{ id, label, icon?, screens:[{ id, label, placedWidgets:[{ id, widgetId, span, config? }] }] }],
  *     widgets:[{ id, version, bundle, bundleHash, requires[] }] }   ← the server-approved set
@@ -51,7 +50,7 @@ export type SignedMenu = SignedLayout['menus'][number];
 export type SignedScreen = SignedMenu['screens'][number];
 export type SignedPlaced = SignedScreen['placedWidgets'][number];
 
-/** Verified layout for this portal; null = no published layout (coded menus apply). */
+/** This portal's published layout; null = none (the gate shows "No menu configured"). */
 export const SignedLayoutCtx = createContext<SignedLayout | null>(null);
 
 export function useSignedLayout(): SignedLayout | null {
@@ -71,7 +70,7 @@ export interface MenuAccess {
   cells: ReadonlySet<string>;
 }
 
-/** Fail-closed default: outside a verified delivery nothing on a published menu is reachable. */
+/** Default outside a loaded menu: nothing on a published menu is reachable. */
 export const NO_MENU_ACCESS: MenuAccess = { full: false, cells: new Set() };
 
 export function menuCell(menuId: string, screenId: string, action: MenuAction): string {

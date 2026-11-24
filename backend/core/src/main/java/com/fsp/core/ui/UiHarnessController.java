@@ -25,16 +25,14 @@ public class UiHarnessController {
 
     private final WidgetRegistryService registry;
     private final PortalLayoutService layouts;
-    private final UiBundleService bundles;
-    private final UiSigner signer;
+    private final PortalMenuService menus;
     private final ApiDiscoveryService discovery;
 
     public UiHarnessController(WidgetRegistryService registry, PortalLayoutService layouts,
-                               UiBundleService bundles, UiSigner signer, ApiDiscoveryService discovery) {
+                               PortalMenuService menus, ApiDiscoveryService discovery) {
         this.registry = registry;
         this.layouts = layouts;
-        this.bundles = bundles;
-        this.signer = signer;
+        this.menus = menus;
         this.discovery = discovery;
     }
 
@@ -93,25 +91,15 @@ public class UiHarnessController {
         return layouts.published(portal, actor(request));
     }
 
-    // -------- signed delivery (plans/signed-portal-delivery-plan.md S1) --------
+    // -------- portal menus --------
 
-    /** The verify-then-render input for slice S2: {payload, digest, jws, kid}. */
-    @FspOperation(id = "ui.bundle.read", component = "ui", risk = FspOperation.OperationRisk.READ,
-            permission = "", resource = "TENANT", title = "Read the signed delivery bundle for a portal")
-    @GetMapping("/bundles/{portal}")
-    public UiDtos.BundleView bundle(@PathVariable String portal, HttpServletRequest request) {
-        actor(request); // authenticated-only, like the published read
-        return bundles.current(portal);
-    }
-
-    /** Public signing keys only (never the private key). The browser's real trust anchor
-     *  remains the JWKS pinned into the SPA at build time — this endpoint is informational. */
-    @FspOperation(id = "ui.truststore.read", component = "ui", risk = FspOperation.OperationRisk.READ,
-            permission = "", resource = "TENANT", title = "Public signing keys for bundle verification")
-    @GetMapping("/trust-store")
-    public List<UiDtos.TrustStoreView> trustStore(HttpServletRequest request) {
-        actor(request);
-        return List.of(signer.jwk());
+    /** A portal's published menus + the widgets that work in it (any signed-in person). */
+    @FspOperation(id = "ui.menu.read", component = "ui", risk = FspOperation.OperationRisk.READ,
+            permission = "", resource = "TENANT", title = "Read a portal's published menus")
+    @GetMapping("/menus/{portal}")
+    public java.util.Map<String, Object> menu(@PathVariable String portal, HttpServletRequest request) {
+        actor(request); // authenticated-only
+        return menus.menu(portal);
     }
 
     private Actor actor(HttpServletRequest request) {

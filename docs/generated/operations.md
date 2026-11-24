@@ -95,12 +95,11 @@
 | tenant.subtree.read | —(owner-scoped) | — | `TenantSubtreeController.java` |
 | tenant.verification.record | —(owner-scoped) | — | `TenantVerificationController.java` |
 | ui.backend.apis.read | —(owner-scoped) | READ | `UiHarnessController.java` |
-| ui.bundle.read | —(owner-scoped) | READ | `UiHarnessController.java` |
 | ui.layout.draft.read | —(owner-scoped) | READ | `UiHarnessController.java` |
 | ui.layout.draft.save | —(owner-scoped) | FOUR_EYES | `UiHarnessController.java` |
 | ui.layout.publish.submit | —(owner-scoped) | FOUR_EYES | `UiHarnessController.java` |
 | ui.layout.published.read | —(owner-scoped) | READ | `UiHarnessController.java` |
-| ui.truststore.read | —(owner-scoped) | READ | `UiHarnessController.java` |
+| ui.menu.read | —(owner-scoped) | READ | `UiHarnessController.java` |
 | ui.widget.list | —(owner-scoped) | READ | `UiHarnessController.java` |
 | ui.widget.register | —(owner-scoped) | WRITE | `UiHarnessController.java` |
 | user.activate | —(owner-scoped) | — | `UserAdminController.java` |

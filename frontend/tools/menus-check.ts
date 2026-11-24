@@ -3,7 +3,7 @@
  * Reads the repo seed (R__seed_portal_menus.sql) without a database and fails when a portal
  * would not render after deploy:
  *   - a layout does not have the shape the portal accepts (the same zod schema it verifies with);
- *   - a placed widget is not in the seed's widget list (the signed bundle would not approve it);
+ *   - a placed widget is not in the seed's widget list (the portal would not render it);
  *   - a placed widget is not in this build, or its major version differs (it would vanish).
  *
  *   bun run menus:check

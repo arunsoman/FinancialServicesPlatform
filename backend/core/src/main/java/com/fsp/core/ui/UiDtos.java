@@ -13,7 +13,7 @@ public final class UiDtos {
 
     /** PUT /v1/ui/widgets — idempotent on the widget id (re-register = version bump).
      *  bundleSha256: optional "sha256:<64 hex>" of the BUILT asset chunk; embeds into the
-     *  signed delivery bundle so the SPA can verify chunk integrity at import (SRI-style). */
+     *  registry (recorded with the widget; not checked by the portal). */
     public record WidgetRegistration(
             String id, String version, String label, String category, String bundle,
             List<String> portals, List<String> requires, String bundleSha256) {
@@ -38,19 +38,6 @@ public final class UiDtos {
 
     public record LayoutSummary(
             String portal, String status, UUID makerId, String updatedAt, UUID approvalId) {
-    }
-
-    // ---------- signed delivery (plans/signed-portal-delivery-plan.md) ----------
-
-    /** GET /v1/ui/bundles/{portal} — verify-then-render input (S2).
-     *  payload = canonical JSON; digest = "sha256:<hex>" over payload; jws = ES256 compact. */
-    public record BundleView(UUID id, String portal, String kid, String alg,
-                             String digest, String payload, String jws) {
-    }
-
-    /** GET /v1/ui/trust-store — PUBLIC keys only (never the signing private key). */
-    public record TrustStoreView(String kid, String alg, String kty, String crv,
-                                 String x, String y) {
     }
 
     // ---------- backend API discovery (widget workbench LLM prompt) ----------

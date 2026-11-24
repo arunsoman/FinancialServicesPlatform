@@ -1,8 +1,0 @@
-{
-  "_comment": "Build-pinned JWKS for signed portal delivery (plans/signed-portal-delivery-plan.md §2.3). This file IS the browser trust anchor: the running portal accepts only kids listed here, discovered at RUNTIME keys are never trusted. Rotate by adding a new kid here, shipping an overlap build, then removing the old kid. Never put private keys in this file.",
-  "pinnedAt": "2026-11-19",
-  "keys": [
-    { "kid": "ui-builder-dev-1", "alg": "ES256", "kty": "EC", "crv": "P-256",
-      "x": "MJi3pzThsVBJdxWCLO0pAFUj_8Vw5uDqizLRVVhoDcs", "y": "bUzeh7hRcpCVAeKknapWXik5Cg0iL_NURP8snTL1Rs8" }
-  ]
-}

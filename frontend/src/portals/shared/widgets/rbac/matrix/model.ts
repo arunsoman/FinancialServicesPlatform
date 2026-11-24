@@ -6,11 +6,8 @@ import type { WidgetDataPortLike, WidgetDef } from '../../core/manifest';
 import { menuCell, placedDef, screenLink } from '../../../../signed/signed-layout';
 import type { MenuAccess, MenuAction } from '../../../../signed/signed-layout';
 import { parseMenuAccess } from '../../../../signed/menu-access';
-import { signedLayoutSchema } from '../../../../signed/signed-layout';
 import type { SignedLayout } from '../../../../signed/signed-layout';
-import { verifyDelivery } from '../../../../signed/delivery';
-import type { Delivery } from '../../../../signed/delivery';
-import type { SignedBundle } from '../../../../signed/verify';
+import { loadMenus } from '../../../../signed/delivery';
 import { deliveryKeyForTenant, portalLabel } from '../../../../portal-config';
 import { toProblem } from '../../kit/problem';
 
@@ -154,27 +151,11 @@ export type MenuState =
   | { kind: 'loading' }
   | { kind: 'ready'; portal: string; label: string; layout: SignedLayout }
   | { kind: 'missing'; portal: string | null }
-  | { kind: 'closed'; portal: string; reason: string }
+  | { kind: 'invalid'; portal: string; reason: string }
   | { kind: 'error'; message: string; retry: () => void };
 
 /**
- * Fixture lane only (workbench, signed out): the fixture is an unsigned layout payload — no
- * network was touched and no signing key exists for it — so it is shape- and portal-checked but
- * cannot be signature-checked. The live lane ALWAYS goes through verifyDelivery.
- */
-async function fixtureDelivery(portal: string, load: () => Promise<unknown>): Promise<Delivery> {
-  try {
-    const parsed = signedLayoutSchema.safeParse(await load());
-    if (!parsed.success || parsed.data.portal !== portal) return { kind: 'closed', reason: 'payload_shape', evidenceId: 'fixture' };
-    return { kind: 'layout', layout: parsed.data };
-  } catch (err) {
-    if ((err as { status?: number }).status === 404) return { kind: 'missing' };
-    throw err;
-  }
-}
-
-/**
- * The matrix rows' ONLY source: the published, signature-verified menu of the portal the org's
+ * The matrix rows' ONLY source: the published menu of the portal the org's
  * people sign in to (platform org → admin console; a tenant → its sub-type's portal; when acting
  * as a tenant, the TARGET's). No published layout → no rows (never the coded menu).
  */
@@ -189,13 +170,10 @@ export function usePublishedMenu(port: WidgetDataPortLike, orgId: string, mode: 
   const portal = org.data ? deliveryKeyForTenant(org.data) : null;
   const menu = useQuery({
     queryKey: ['rbac-menu', orgId, 'layout', portal, mode],
-    queryFn: () => {
-      const load = () => port.request<SignedBundle>('rbac.matrix.menu', { portal: portal! });
-      return mode === 'live' ? verifyDelivery(portal!, load) : fixtureDelivery(portal!, load);
-    },
+    queryFn: () => loadMenus(portal!, () => port.request<unknown>('rbac.matrix.menu', { portal: portal! })),
     enabled: portal !== null,
     staleTime: 60_000,
-    retry: 0, // money-grade rule (ui-std §7): zero auto-retries — the outcome is surfaced
+    retry: 1, // an idempotent read (ui-std §7)
   });
 
   if (org.isError) return { kind: 'error', message: toProblem(org.error).message, retry: () => void org.refetch() };
@@ -208,7 +186,7 @@ export function usePublishedMenu(port: WidgetDataPortLike, orgId: string, mode: 
     case 'layout': return { kind: 'ready', portal, label: portalLabel(portal), layout: d.layout };
     case 'missing': return { kind: 'missing', portal };
     case 'reauth': return { kind: 'error', message: 'Your session has ended — sign in again.', retry: () => void menu.refetch() };
-    case 'closed': return { kind: 'closed', portal, reason: d.reason };
+    case 'invalid': return { kind: 'invalid', portal, reason: d.reason };
   }
 }
 

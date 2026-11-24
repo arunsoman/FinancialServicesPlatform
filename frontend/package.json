@@ -28,9 +28,7 @@
     "widgets:register-bff": "bun run tools/widget-agent.ts register",
     "widgets:stage": "bun run tools/widget-agent.ts stage",
     "widgets:accept": "bun run tools/widget-agent.ts accept",
-    "widgets:done": "bun run tools/widget-agent.ts done",
-    "portal:check": "bun run tools/portal-trust.ts check",
-    "portal:pin": "bun run tools/portal-trust.ts pin"
+    "widgets:done": "bun run tools/widget-agent.ts done"
   },
   "dependencies": {
     "@fontsource/figtree": "^5.3.0",

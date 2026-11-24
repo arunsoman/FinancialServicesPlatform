@@ -13,15 +13,14 @@ flowchart LR
   S5 --> S6["6 Place on screen<br/>Portal builder"]
   S6 --> S7["7 Preview<br/>3 real device sizes"]
   S7 --> S8["8 Ship<br/>export, commit, PR"]
-  S8 --> S9["9 Deploy<br/>CI/CD, core signs"]
+  S8 --> S9["9 Deploy<br/>CI/CD applies the seed"]
   S9 --> LIVE(["Live in every portal"])
 ```
 
 A requested change loops back to stage 1 and is re-tested before the next review. Once approved,
 the UI and its data contract are locked, and the backend is built to match.
 
-Related: [portal-menus.md](portal-menus.md) (how menus ship), [ui-metadata-tampered.md](ui-metadata-tampered.md)
-(the tampered-UI runbook), [widget-workbench.md](widget-workbench.md), the fsp-widget skill
+Related: [portal-menus.md](portal-menus.md) (how menus ship), [widget-workbench.md](widget-workbench.md), the fsp-widget skill
 (`.agents/skills/fsp-widget/`) and the menu-publisher skill (`.agents/skills/menu-publisher/`).
 
 ---
@@ -34,7 +33,7 @@ Related: [portal-menus.md](portal-menus.md) (how menus ship), [ui-metadata-tampe
 | Agent (fsp-widget skill) | Builds the UI on test data, then the backend, and runs every check | Claude Code in the repo |
 | UI approver | Looks at the widget in the workbench and replies "approved" or asks for changes | Workbench preview link |
 | Pull-request reviewer | Reviews code, migrations and the menu seed like any other change | Git host |
-| CI/CD | Runs the checks, builds, deploys; every environment applies the seed and signs the menus | Pipeline |
+| CI/CD | Runs the checks, builds, deploys; every environment applies the seed | Pipeline |
 
 Tools:
 
@@ -249,7 +248,7 @@ widgets and live data — what users will get, before anything is committed.
 ## Step 8 — Ship: export, commit, pull request, deploy
 
 Menus ship like code: export them into the repo seed, commit, open a pull request, and CI/CD
-deploys them with everything else. The pull request is the review; nothing is signed by hand.
+deploys them with everything else. The pull request is the review.
 
 1. **Export** — ask the agent to "publish my menus" (menu-publisher skill), or run
    `make menus-publish`. It writes each portal's newest layout and every registered widget into
@@ -266,8 +265,7 @@ deploys them with everything else. The pull request is the review; nothing is si
    see "What the pipeline must run" below); reviewers review code, migrations and seed.
 6. **Deploy** — each environment runs Flyway: new migrations, then the repeatable seed ("the repo
    wins": each portal's published layout becomes exactly the seed; unchanged rows are not
-   touched). At boot core signs every portal whose menus changed with that environment's own key
-   (audited as `UI_BUNDLE_SIGNED_AT_BOOT`). A plain restart signs nothing.
+   touched). Portals then read the published menus straight from core.
 
 Locally, restarting core does the same as a deploy.
 
@@ -345,8 +343,8 @@ you use:
 | Docs | `make docs-check` | Generated architecture docs are stale |
 | Deploy core | your usual deploy | — |
 
-On deploy, Flyway applies new migrations, then the seed. At boot core signs each portal whose
-menus changed with that environment's own key; the log shows `ui_bundle_boot_sync signed=<n>`.
+On deploy, Flyway applies new migrations, then the seed; the core log shows
+`Migrating schema "public" with repeatable migration "seed portal menus"` when the menus changed.
 
 ### Working with teammates
 
@@ -361,7 +359,7 @@ menus changed with that environment's own key; the log shows `ui_bundle_boot_syn
 ### Rolling back
 
 Revert the commit (`git revert <sha>`), merge, deploy. The seed brings the previous menus back
-and core re-signs them at boot.
+as soon as core starts.
 
 ## Step 9 — After deploy: verify, change, remove
 
@@ -369,7 +367,7 @@ After each deploy, check the menu as a real user; later changes go round the sam
 
 Verify in each environment:
 
-- [ ] Core's boot log shows `ui_bundle_boot_sync signed=<n>` with the portals you changed.
+- [ ] Core's boot log shows the repeatable migration "seed portal menus" ran (only when the menus changed).
 - [ ] Sign in as a user of each changed portal: the new menu entry is there and the screen loads.
 - [ ] Users without the widget's permissions don't see it.
 - [ ] Money or approval flows are tried once end to end where the environment allows.
@@ -386,69 +384,24 @@ code. `menus:check` fails the build while any menu still places it.
 
 ---
 
-## Fixing menu and UI-metadata corruption
+## Fixing menu problems
 
-A portal renders its menus only after the browser verifies their signature, so any corruption
-shows up as a refusal card, never as a broken page. Read the card's reason line, then fix the
-cause below.
+Portals load their published menus straight from core. A menu problem shows as one of the
+screens below, and each has a plain fix.
 
-> **On a shared, staging or production environment, don't re-sign or re-pin anything.** The
-> tampered card is a security control. Capture the **Evidence id** from the card, the time and the
-> portal, and escalate. The fixes below are for developer machines (and for a deploy you know you
-> just made).
-
-### How the check works
-
-| Piece | Role |
-| --- | --- |
-| `infrastructure/pki/dev/ui-builder-signing.pem` | Core signs each portal's menus with this key (read at core startup) |
-| `frontend/src/portals/signed/trust-store.json` | The portal verifies against the public key pinned here (kid `ui-builder-dev-1`) |
-| Postgres `ui_bundles` | The published menus and their stored signature |
-| `UiBundleBootSync` (core) | At boot, signs every portal whose bundle is missing, stale or signed by another key |
-
-The portal shows menus only when all of them agree.
-
-### Reason on the card → cause → fix
-
-| Card says | Usual cause | Fix (developer machine) |
+| What you see | Usual cause | Fix |
 | --- | --- | --- |
-| **UI metadata tampered** · *Signature does not validate* | Stored bundle signed by an older key (keys regenerated, database copied from another machine); core still holds the old key; or the SPA pins a teammate's key (`trust-store.json` pulled from git) | Restart core — it re-signs at boot. Still failing → `bun run portal:check`; if it reports a different key, `bun run portal:pin` and reload |
-| **UI metadata tampered** · *Signing key is not in this build's trust store* | The bundle was signed under a key id this build doesn't pin (another environment's key, or no pki step after cloning) | `bun run portal:check`, then `bun run portal:pin` and restart core; reload. Don't commit the pin |
-| **UI metadata tampered** · *Delivered payload is not the signed payload* / *Content hash drifted* | The bundle row was changed after signing (a hand edit in the database, a partial restore) | Never edit it by hand. Restart core — it re-signs from the published layout. Outside dev: escalate |
-| **UI metadata tampered** · *Signed payload is not a layout this build understands* | The published layout doesn't fit this frontend build (a hand-edited seed, an old build against new menus) | Re-export from the builder (`make menus-publish`), `bun run menus:check`, restart core |
-| **UI metadata tampered** · *Signed layout belongs to a different portal* | One portal's bundle stored under another | Re-export and restart core; check the seed wasn't hand-edited |
-| **No menu configured for this portal** · *No signed layout has been published* | Fresh database, the seed has no layout for this portal, or core hasn't booted since the seed changed | Restart core. Still empty → the portal has no layout in the seed: build it in the builder, export, restart |
-| *The signed layout could not be fetched* | Core, gateway or BFF is down, or the session expired | Bring the stack up, sign in again |
+| **No menu configured for this portal** | Fresh database, the seed has no layout for this portal, or core hasn't started since the seed changed | Restart core (it applies the seed). Still empty → build the portal's menus in the builder, export, restart |
+| **Couldn’t load the … menus** · *The server didn’t answer* | Core, gateway or BFF is down, or the network dropped | Bring the stack up, press **Try again** |
+| **Couldn’t load the … menus** · *not in a shape this version understands* | A hand-edited seed, or an old frontend build against newer menus | Re-export from the builder (`make menus-publish`), `bun run menus:check`, restart core; rebuild the frontend |
+| **Couldn’t load your menu access** | The person's menu permissions couldn't be read | Press **Try again**; check core is up |
 | A screen shows **"not registered yet"** instead of a widget | The menu places a widget core doesn't hold | Register it (Step 3); re-export if its version changed |
-| The menus are **old** after a deploy | The seed wasn't applied, or core wasn't restarted | Check the boot log for `ui_bundle_boot_sync`; restart core; confirm the deployed commit has the seed change |
-| The builder opens **wrong or empty menus** | This browser's saved copy is stale or damaged (`localStorage` key `fsp.widget-workbench.builder.<portal>`) | Click **Use the server's layout** if offered, or **Discard my changes**. Last resort: delete that key in the browser's dev tools and reload |
-| **`menus:check` fails** in CI | A placed widget is missing from the build, at another major version, or a menu has no submenus | Fix the menu in the builder (or restore the widget), export again — never hand-edit the seed |
-| **Export refuses**: unregistered widget | A menu places a widget core doesn't hold | Register it, export again |
+| The menus are **old** after a deploy | The seed wasn't applied, or core wasn't restarted | Restart core; confirm the deployed commit has the seed change |
+| The builder opens **wrong or empty menus** | This browser's saved copy is stale (`localStorage` key `fsp.widget-workbench.builder.<portal>`) | **Use the server's layout** if offered, or **Discard my changes**. Last resort: delete that key in the browser's dev tools and reload |
+| **`menus:check` fails** in CI, or the **export refuses** | A placed widget is missing from the build, unregistered, or at another major version; or a menu has no submenus | Register or restore the widget, fix the menu in the builder, export again |
 
-### The three commands that fix most cases
-
-Run these from `frontend/` on a developer machine:
-
-```bash
-bun run portal:check   # do the key pair and the SPA pin belong together?
-bun run portal:pin     # only if portal:check reported a different key: re-pin the SPA to your key
-# then restart core: it re-signs every portal that is missing, stale or signed by another key
-```
-
-If `portal:check` reports missing keys, generate them once (`make pki` on Linux/macOS,
-`powershell -File scripts\dev-windows.ps1 pki` on Windows) and restart core.
-
-### Never do this
-
-- Don't edit `ui_bundles` or `ui_layouts` in the database, or hand-craft a signature. Restart core:
-  it signs through the same path as production.
-- Don't hand-edit `R__seed_portal_menus.sql`. Change the menus in the builder and export.
-- Don't commit the `trust-store.json` change that `portal:pin` makes — it pins *your* key and
-  breaks every other developer.
-- Don't delete `ui-builder-signing.pem` casually: a new key invalidates every bundle until core
-  restarts.
-
-Full runbook: [ui-metadata-tampered.md](ui-metadata-tampered.md).
+Never hand-edit `R__seed_portal_menus.sql` or the `ui_layouts` table: change the menus in the
+builder and export.
 
 ---
 
@@ -470,7 +423,7 @@ These hold on every widget, every stage; [AGENTS.md](../AGENTS.md) is the full s
 ## Troubleshooting
 
 Most problems so far came from a stale dev server or a service that wasn't restarted. For menu
-and signature errors, see [Fixing menu and UI-metadata corruption](#fixing-menu-and-ui-metadata-corruption).
+screens, see [Fixing menu problems](#fixing-menu-problems).
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
@@ -503,6 +456,5 @@ Run widget commands from `frontend/`, the rest from the repo root.
 | Backend tests (scoped) | `cd backend && ./gradlew :core:test --tests '<package>.*'` |
 | Export menus into the seed | `make menus-publish` |
 | Check menus render with this build | `bun run menus:check` |
-| Check / re-pin the portal signing key | `bun run portal:check` / `bun run portal:pin` |
 | Typecheck the frontend | `bun run typecheck` |
 | All frontend unit tests | `bunx vitest run` |

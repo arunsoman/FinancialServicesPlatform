@@ -146,13 +146,13 @@ test('GAP-6 · /merchant is a real portal entry (boots its own app and reaches t
   await ctx.close();
 });
 
-/* ─────────────────────────── GAP-7 · admin console renders its signed menu ─────────────────────────── */
+/* ─────────────────────────── GAP-7 · admin console renders its published menu ─────────────────────────── */
 
-test('GAP-7 · the admin console verifies a signed bundle and renders its menu', async () => {
+test('GAP-7 · the admin console loads its published menus and renders them', async () => {
   const page = platformMaker.page;
   await page.goto('/admin/');
   await page.waitForLoadState('networkidle');
-  await expect(page.getByText(/UI metadata tampered/)).toHaveCount(0);
+  await expect(page.getByText(/Couldn’t load the .* menus/)).toHaveCount(0);
   await expect(page.getByRole('navigation', { name: 'Portal navigation' })).toBeVisible();
 });
 
@@ -269,7 +269,7 @@ test('ORG-ACT-AS · clicking an org shows its users; acting as its admin creates
   await clearActAs(platformMaker);
   const me = await sessionUser(platformMaker);
 
-  // Organization screen (signed admin layout) → click the org row: stay here, its users appear
+  // Organization screen (published admin layout) → click the org row: stay here, its users appear
   await page.goto('/admin');
   await page.getByRole('navigation', { name: 'Portal navigation' })
     .getByRole('link', { name: /Organization$/ }).click();

@@ -25,7 +25,7 @@ export interface PortalConfig {
   accent: string;
   /** distinct localStorage key so sessions never bleed across portals. */
   storageKey: string;
-  /** The portal name signed bundles are published under (core `ui_bundles.portal`, the
+  /** The portal name layouts are published under (core `ui_layouts.portal`, the
    *  portal builder's publish target) — NOT the menu PortalId ('platform' | 'org'). */
   deliveryKey: string;
 }
@@ -79,7 +79,7 @@ export const PORTAL_MERCHANT: PortalConfig = {
 /** The widget workbench (SME projects/widget-workbench): widget frames, registry, portal
  *  builder. Fixture views work signed out; live data and publishing need a platform-staff
  *  session. Its own storageKey so workbench sign-out never touches a portal session (FAPI2
- *  per-portal isolation). It PRODUCES signed bundles, so it is not itself gated on one. */
+ *  per-portal isolation). It PRODUCES portal layouts, so it is not itself gated on one. */
 export const WORKBENCH_PORTAL: PortalConfig = {
   tenantSubType: 'PLATFORM',
   basePath: '/widget-workbench',
@@ -90,7 +90,7 @@ export const WORKBENCH_PORTAL: PortalConfig = {
 };
 
 /**
- * The portal (signed-delivery key) an organization's people sign in to — the SAME admission
+ * The portal (layout key) an organization's people sign in to — the SAME admission
  * rule as portal eligibility: the platform org → the admin console; a tenant → the org portal
  * of its sub-type (or, for a legacy row with no sub-type, the portal whose admitsTypes names
  * its type). null = no portal admits it, so it has no published menu (callers fail closed).

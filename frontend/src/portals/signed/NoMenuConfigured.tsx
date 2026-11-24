@@ -1,7 +1,7 @@
 /**
  * A portal with NO published layout has no menu — and says so. Menus come only from the
- * signed, published layout (portal builder → four-eyes publish → core signs); there is no
- * build-time fallback menu. Not a tamper verdict: nothing was altered, nothing was published.
+ * published layout (portal builder → menu publisher → repo seed → deploy); there is no
+ * build-time fallback menu. Nothing was published for this portal.
  */
 import type { ReactNode } from 'react';
 

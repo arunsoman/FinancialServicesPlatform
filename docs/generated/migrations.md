@@ -37,6 +37,7 @@ timeline
     V39 : branch maintenance
     V40 : invoice permissions
     V41 : invoices
+    V42 : drop signed portal delivery
 
-**Next free migration number: V42.**
+**Next free migration number: V43.**
 ```

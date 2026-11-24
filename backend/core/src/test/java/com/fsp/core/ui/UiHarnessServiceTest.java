@@ -44,7 +44,7 @@ class UiHarnessServiceTest {
     void rejectsUnknownPermissionCell() {
         PermissionRepository perms = org.mockito.Mockito.mock(PermissionRepository.class);
         when(perms.findById(any())).thenReturn(Optional.empty());
-        WidgetRegistryService svc = new WidgetRegistryService(null, perms, permissivePermissions(), org.mockito.Mockito.mock(UiBundleService.class));
+        WidgetRegistryService svc = new WidgetRegistryService(null, perms, permissivePermissions());
 
         var dto = new UiDtos.WidgetRegistration("kyc.orgs", "1.0.0", "Org tree", "kyc",
             "widgets/kyc-orgs", List.of("admin"), List.of("kyc.org.view"), null);
@@ -57,8 +57,7 @@ class UiHarnessServiceTest {
     void rejectsBadWidgetId() {
         WidgetRegistryService svc = new WidgetRegistryService(
             org.mockito.Mockito.mock(UiWidgetRepository.class),
-            org.mockito.Mockito.mock(PermissionRepository.class), permissivePermissions(),
-            org.mockito.Mockito.mock(UiBundleService.class));
+            org.mockito.Mockito.mock(PermissionRepository.class), permissivePermissions());
 
         var dto = new UiDtos.WidgetRegistration("Bad Id", "1.0.0", "l", "c", "b", List.of(), List.of(), null);
         assertThatThrownBy(() -> svc.register(dto, ADMIN))
@@ -72,7 +71,7 @@ class UiHarnessServiceTest {
         PermissionRepository perms = org.mockito.Mockito.mock(PermissionRepository.class);
         when(perms.findById("kyc.org.view")).thenReturn(Optional.of(new Permission()));
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        WidgetRegistryService svc = new WidgetRegistryService(repo, perms, permissivePermissions(), org.mockito.Mockito.mock(UiBundleService.class));
+        WidgetRegistryService svc = new WidgetRegistryService(repo, perms, permissivePermissions());
 
         var dto = new UiDtos.WidgetRegistration("kyc.orgs", "1.0.0", "Org tree", "kyc",
             "widgets/kyc-orgs", List.of("admin"), List.of("kyc.org.view"), null);
@@ -183,8 +182,7 @@ class UiHarnessServiceTest {
         when(repo.findById(draft.id)).thenReturn(Optional.of(draft));
         when(repo.findFirstByPortalAndStatus("admin", UiLayout.Status.PUBLISHED)).thenReturn(Optional.empty());
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        UiBundleService bundleSvc = org.mockito.Mockito.mock(UiBundleService.class);
-        UiLayoutPublishHandler handler = new UiLayoutPublishHandler(repo, bundleSvc, new LayoutValidator());
+        UiLayoutPublishHandler handler = new UiLayoutPublishHandler(repo, new LayoutValidator());
 
         String submittedSnapshot = "{\"portal\":\"admin\",\"menus\":[{\"id\":\"m1\",\"label\":\"Approved\"," +
             "\"screens\":[{\"id\":\"s1\",\"label\":\"Dash\",\"placedWidgets\":[]}]}]}";
@@ -209,8 +207,7 @@ class UiHarnessServiceTest {
         UiLayout draft = draft();
         UiLayoutRepository repo = org.mockito.Mockito.mock(UiLayoutRepository.class);
         when(repo.findById(draft.id)).thenReturn(Optional.of(draft));
-        UiLayoutPublishHandler handler = new UiLayoutPublishHandler(repo,
-            org.mockito.Mockito.mock(UiBundleService.class), new LayoutValidator());
+        UiLayoutPublishHandler handler = new UiLayoutPublishHandler(repo, new LayoutValidator());
 
         ApprovalRequest approval = new ApprovalRequest();
         approval.id = UUID.randomUUID();
@@ -223,15 +220,15 @@ class UiHarnessServiceTest {
 
     @Test
     void publishIsAtomicWithApprovalResolution() {
-        // DB-only effect (layout + signed bundle) must commit WITH the approval row — else a
+        // DB-only effect (the layout row) must commit WITH the approval row — else a
         // bundle failure strands an APPROVED approval whose layout never publishes.
-        assertThat(new UiLayoutPublishHandler(null, null, new LayoutValidator()).atomicWithResolution())
+        assertThat(new UiLayoutPublishHandler(null, new LayoutValidator()).atomicWithResolution())
             .isTrue();
     }
 
     @Test
     void publishHandlerOpTypeIsWired() {
-        assertThat(new UiLayoutPublishHandler(null, null, new LayoutValidator()).operationType())
+        assertThat(new UiLayoutPublishHandler(null, new LayoutValidator()).operationType())
             .isEqualTo(ApprovalRequest.OpType.UI_LAYOUT_PUBLISH);
     }
 

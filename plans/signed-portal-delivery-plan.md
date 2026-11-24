@@ -1,3 +1,6 @@
+> **Superseded (2026-11-24): signed portal delivery was removed.** Portals load their published menus
+> from core (`GET /v1/ui/menus/{portal}`); `ui_bundles` is dropped (V42). Kept for history.
+
 # Signed Portal Delivery & Tamper Detection — Plan
 
 **Status:** S1–S4 delivered (SPA slices S2/S3 verified by gate + tamper tests; S4 live-smoked) · **Companion to:** `plans/widget-harness-prd.md`

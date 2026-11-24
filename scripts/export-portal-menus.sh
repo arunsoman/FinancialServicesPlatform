@@ -11,7 +11,7 @@
 #   - widgets are inserted or updated to the exported definition (bundle_sha256 stays per env).
 # Per portal the NEWEST layout is exported — the saved builder draft if it is newer than the
 # published one — so nothing needs publishing locally first.
-# Core signs the result at boot (UiBundleBootSync) with each environment's own key.
+# Every environment applies it on deploy; portals read the published layout from core.
 #
 # Usage: scripts/export-portal-menus.sh [output-file]
 #   FSP_PSQL  psql command to use (default: docker exec -i fsp-postgres psql -U fsp -d fsp)
@@ -31,7 +31,7 @@ CREATE TEMP VIEW menus AS
   FROM ui_layouts
   ORDER BY portal, updated_at DESC;
 
--- every placed widget must be registered (ACTIVE), or the signed bundle would not approve it
+-- every placed widget must be registered (ACTIVE), or the portal would not render it
 SELECT format('MISSING-WIDGET %s (portal %s)', w, portal)
 FROM (SELECT DISTINCT portal,
              jsonb_path_query(layout, '$.menus[*].screens[*].placedWidgets[*].widgetId') #>> '{}' AS w
@@ -94,7 +94,7 @@ fi
 -- changes) and the REPO WINS: each portal's PUBLISHED layout and every widget below are set
 -- to exactly this on deploy. The pull request that changes this file is the review.
 --   * maker = platform-admin (system seed V2); no approval row;
---   * core signs the bundles at boot (UiBundleBootSync) with each environment's own key.
+--   * portals read the published layout straight from core; nothing is signed.
 
 EOF
   echo "-- ===== widgets ====="

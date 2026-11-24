@@ -6,7 +6,6 @@ import { FormField } from '../../kit/FormField';
 import { InlineConfirm } from '../../kit/InlineConfirm';
 import { SelectField } from '../../kit/SelectField';
 import { StatePanel } from '../../kit/StatePanel';
-import { reasonLabel } from '../../../../signed/verify';
 import type { MenuAccess } from '../../../../signed/signed-layout';
 import { PermissionMatrix } from './PermissionMatrix';
 import { SectionHeading } from './SectionHeading';
@@ -135,8 +134,8 @@ export function RoleForm(p: RoleFormProps) {
           <StatePanel kind="empty"
             title={menu.portal ? `The ${menu.portal} portal has no published menu yet` : 'This organization signs in to no portal'}
             hint={menu.portal ? 'Permissions are granted per submenu. Publish this portal’s layout in the portal builder, then come back.' : undefined} />
-        ) : menu.kind === 'closed' ? (
-          <StatePanel kind="error" title={`The ${menu.portal} portal’s published menu failed verification`} hint={reasonLabel(menu.reason)} />
+        ) : menu.kind === 'invalid' ? (
+          <StatePanel kind="error" title={`The ${menu.portal} portal’s published menu couldn’t be read`} hint={menu.reason} />
         ) : (
           <StatePanel kind="error" title="Couldn’t load the published menu" hint={menu.message} onRetry={menu.retry} />
         )}

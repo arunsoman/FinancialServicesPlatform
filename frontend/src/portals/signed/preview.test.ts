@@ -1,6 +1,6 @@
 /**
  * Builder preview (preview.ts): the builder's editor copy renders through the SAME layout
- * pipeline as a signed delivery, every build widget counts as approved, and a tab only turns
+ * pipeline as the published menus, every build widget counts as approved, and a tab only turns
  * into a preview when asked (`?preview=1`), for exactly one portal.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

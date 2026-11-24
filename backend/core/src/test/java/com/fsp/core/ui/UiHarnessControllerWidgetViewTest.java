@@ -33,7 +33,7 @@ class UiHarnessControllerWidgetViewTest {
         w.updatedAt = Instant.parse("2026-11-20T10:30:00Z");
         when(registry.list(any())).thenReturn(List.of(w));
 
-        UiHarnessController controller = new UiHarnessController(registry, null, null, null, null);
+        UiHarnessController controller = new UiHarnessController(registry, null, null, null);
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("fsp.actor")).thenReturn(new Actor(UUID.randomUUID(), "platform-admin", UUID.randomUUID()));
 

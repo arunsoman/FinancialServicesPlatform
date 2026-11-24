@@ -27,7 +27,7 @@ Each HTML entry file boots `OrgApp.tsx` (or `AdminApp.tsx`) with a dedicated `Po
 - `basePath`: Browser route prefix (`/admin`, `/manufacturer`, `/merchant`, etc.).
 - `accent`: Portal brand color injected into CSS variables (`--portal-accent`).
 - `storageKey`: Dedicated browser storage prefix to prevent cross-portal session pollution (FAPI 2.0 session isolation).
-- `signedDelivery`: Boolean gate. When `true`, `SignedMenuGate` strictly verifies the ES256 signature of layout bundles before rendering.
+- Menus: `SignedMenuGate` (historical name) loads the portal's published menus from core (`GET /api/ui/menus/{portal}`), checks their shape and renders them. Nothing is signed.
 
 ### 1.2 Session Hydration & Portal Eligibility
 On boot, each portal executes the session handshake:
@@ -89,9 +89,9 @@ flowchart TD
         FOUR["Four-Eyes Approval (/v1/approvals)<br/>OpType: UI_LAYOUT_PUBLISH (Maker != Checker)"]
     end
 
-    subgraph Step6["6. Signed Delivery to Portals"]
-        SIGN["ES256-signed Layout Bundle<br/>(signed by portal builder key)"]
-        PORT["Portals (/admin, /merchant...)<br/>SignedMenuGate verifies & renders widgets"]
+    subgraph Step6["6. Menus as code to Portals"]
+        SIGN["Menu seed in the repo<br/>(make menus-publish → PR → deploy)"]
+        PORT["Portals (/admin, /merchant...)<br/>load published menus from core & render widgets"]
     end
 
     BE --> WP --> WB --> REG --> BLD --> FOUR --> SIGN --> PORT

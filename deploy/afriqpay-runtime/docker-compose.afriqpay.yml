@@ -65,7 +65,7 @@ services:
       FSP_BOOTSTRAP_PASSWORD: ${FSP_BOOTSTRAP_PASSWORD}
       FSP_INTERNAL_CREDENTIAL: ${FSP_INTERNAL_CREDENTIAL}
       FSP_PERSON_PASSWORD: ${FSP_PERSON_PASSWORD}
-      SPRING_APPLICATION_JSON: '{"fsp":{"tigerbeetle":{"addresses":"10.200.0.10:3000"},"ui":{"signing-key-path":"/opt/fsp/pki/ui-builder-signing.pem"},"gateway":{"actor-jwks-url":"http://gateway:8090/.well-known/fsp-actor-jwks"}}}'
+      SPRING_APPLICATION_JSON: '{"fsp":{"tigerbeetle":{"addresses":"10.200.0.10:3000"},"gateway":{"actor-jwks-url":"http://gateway:8090/.well-known/fsp-actor-jwks"}}}'
     volumes:
       - ./pki:/opt/fsp/pki:ro
     networks: [fsp-network]

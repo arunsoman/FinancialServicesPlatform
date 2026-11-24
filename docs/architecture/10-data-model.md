@@ -38,7 +38,7 @@ timeline
     V2 : idempotency_records
     V3 : idp_configs / idp_identities
     V4–V7 : plugin platform identity + registry, outbox, audit hardening
-    V8 : widget harness + signed portal delivery
+    V8 : widget harness + signed portal delivery (removed in V42)
     V9–V10 : plugin registry install/enable, core KYC retired
     V14 : act_as_sessions
     V16 : person checker flag

@@ -24,7 +24,7 @@ Merchant posts its first balanced journal entry to the ledger.
 
 | # | Persona | Username | Password | Signs in at | Portal renders? |
 |---|---------|----------|----------|-------------|-----------------|
-| 1 | Platform maker | `platform-admin` | `$FSP_BOOTSTRAP_PASSWORD` (default `fsp-admin`) | `/admin` | **Yes** ✓ (core signs the seeded menus at boot — GAP-7 fixed) |
+| 1 | Platform maker | `platform-admin` | `$FSP_BOOTSTRAP_PASSWORD` (default `fsp-admin`) | `/admin` | **Yes** ✓ (core serves the seeded menus — GAP-7 fixed) |
 | 2 | Platform checker | `admin-checker` | same | `/admin` | **Yes** ✓ (same) |
 | 3 | Manufacturer admin | `acme.admin.<suffix>` | `$FSP_PERSON_PASSWORD` (default `fsp-person-2026`) | `/manufacturer` | **Yes** ✓ (GAP-5 fixed) |
 | 4 | Manufacturer checker | `acme.checker.<suffix>` | same | `/manufacturer` | **Yes** ✓ — and is a designated checker (GAP-9 fixed) |
@@ -63,7 +63,7 @@ platform pair (four-eyes needs maker ≠ checker; a browser context per persona)
 3. `[UI]` Fill username `platform-admin`, password `fsp-admin`, click "Sign in".
 4. `[UI]` Control returns to the admin portal. **Assert** a session exists —
    `GET /bff/session` returns `platform-admin` — and that the console renders
-   its real navigation menu (GAP-7 closed: core signs the seeded menus at boot,
+   its real navigation menu (GAP-7 closed: core serves the seeded menus,
    docs/portal-menus.md; the spec asserts the portal navigation is visible).
 5. `[UI]` Repeat steps 1–4 in a **separate browser context** for
    `admin-checker`. Never share one context: the four-eyes law is
@@ -269,7 +269,7 @@ it after: `frontend/tests/e2e/gap-probes.spec.ts` (live stack) and
 | GAP-4 | No plugin governance surface | ✅ fixed | `GET /v1/platform/plugins`, `GET /v1/tenants/{id}/plugins` (with readiness gates) + `plugins.governance` screen (register / install requests stay four-eyes). |
 | GAP-5 | PSP had no sub-type → manufacturer wall | ✅ fixed | PSPs stamped `MANUFACTURER` at creation + V19 back-fill; `portalEligible` admits a legacy sub-type-less PSP via `admitsTypes`. |
 | GAP-6 | No merchant portal | ✅ fixed | `merchant.html` + `PORTAL_MERCHANT` (+ workbench/chooser/vite entries). |
-| GAP-7 | Admin console fail-closed without a signed bundle | ✅ fixed for fresh DBs | The repo seed `R__seed_portal_menus.sql` carries every portal's menus; core signs them at boot (`UiBundleBootSync`) — docs/portal-menus.md. |
+| GAP-7 | Admin console had no menu on a fresh DB | ✅ fixed for fresh DBs | The repo seed `R__seed_portal_menus.sql` carries every portal's menus; core serves them as published — docs/portal-menus.md. |
 | GAP-8 | Users widget hid staged users | ✅ fixed | `PENDING` status + "Awaiting approval" chip/filter + banner pointing to Approvals; every user action now says it was REQUESTED (it used to claim "Added"/"was removed"). |
 
 ### Gaps found while fixing (not in the original register)
@@ -306,7 +306,7 @@ password is dead, and the replacement signs in cleanly — docs/architecture/02 
 cd backend && ./gradlew :core:test :plugins:kyc:test       # role/approval/provisioning/screening tests
 cd frontend && bunx vitest run src/portals/gap-probes.test.ts
 # live stack (restart core/gateway/plugin so V19 + new routes load), then:
-# portal menus: none needed — core signs the seeded menus at boot (docs/portal-menus.md)
+# portal menus: none needed — core applies the menu seed at boot (docs/portal-menus.md)
 cd frontend && bunx playwright test tests/e2e/gap-probes.spec.ts tests/e2e/onboarding-chain.spec.ts tests/e2e/unhappy-twin.spec.ts
 ```
 
@@ -325,7 +325,7 @@ flips those steps to `[UI]` automatically.
 | F-3 | **Approvals queue screen** (`approvals.queue` widget: list, approve, reject+reason across USER_*/PLUGIN_*/KYC) | **✅ done** | frontend | GAP-3, GAP-8 (Sc 7.3) | every four-eyes checker half is a click in a screen |
 | F-4 | **Plugin governance screen** (types: register; per tenant: install/uninstall, readiness state) | **✅ done** | frontend | GAP-4 (Sc 2.1–2.6) | platform admins register/install the plugin by clicking |
 | F-5 | **Portal eligibility fix + merchant portal entry** (stamp PSP subType or type-aware eligibility; add `merchant.html` identity) | **✅ done** | frontend + core | GAP-5, GAP-6 (Sc 3.2, Sc 7.1) | manufacturer and merchant personnel land in a rendered portal, not the wall |
-| F-6 | **Signed admin bundle in dev** (menus seeded from the repo, signed by core at boot) | **✅ done** | infra/frontend | GAP-7 (Sc 1.4) | the admin console shell renders its real menu after sign-in |
+| F-6 | **Admin menus in dev** (menus seeded from the repo) | **✅ done** | infra/frontend | GAP-7 (Sc 1.4) | the admin console shell renders its real menu after sign-in |
 | F-7 | **Staging/approval affordance in the users widget** (PENDING banner + “awaiting <checker>” pointer) | **✅ done** | frontend | GAP-8 (Sc 7.2) | the maker sees the staged user and who must act next |
 | F-8 | **Password reset / first-login change** for API-created persons (today they all share `$FSP_PERSON_PASSWORD`) | **✅ done** (`persons.password_must_change` V24 + IdP hosted change, Sc 8.7) | IdP (credential owner) + core flag | Sc 9 note (credentials hygiene) | every person born with the bootstrap password (`persons.password_must_change`) is forced through the IdP hosted change form — credentials never leave the IdP origin, the PAR flow is parked in a 10-min single-use ticket and resumes with the standard auth code; direct token grants get `403 PASSWORD_CHANGE_REQUIRED`; E2E asserts policy/mismatch/same-password rejections, portal resumption, and that the bootstrap password is dead after the change |
 | F-9 | **Adverse-path E2E coverage**: KYC `REJECT`/`REQUEST_INFO`, maker self-approve → explicit refusal + `MAKER_CANNOT_APPROVE` block state, stalled `TENANT_PENDING` recovery (KycRecoveryService) | **✅ done** (`tests/e2e/unhappy-twin.spec.ts` — scenes A–D) | tests + UI states | beyond happy path | the chain's unhappy twin passes with explicit UI states per ui-std §5.2; note: born-role makers never hold `kyc.approve`, so the KYC maker-block surfaces as `PERMISSION_DENIED` + server `block=MAKER` (the person-level `MAKER_CANNOT_APPROVE` is asserted on the USER_CREATE lane) |

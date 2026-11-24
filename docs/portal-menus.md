@@ -2,7 +2,7 @@
 
 Portal menus (the navbar: menus, submenus and the widgets placed on each screen) are built in the
 Portal Builder, previewed locally, committed to the repo and deployed by CI/CD with everything
-else. No approval step, no manual publish, no signing by hand.
+else. No approval step, no manual publish.
 
 The whole widget lifecycle, from idea to deploy, is in [widget-workflow.md](widget-workflow.md).
 
@@ -21,8 +21,8 @@ The whole widget lifecycle, from idea to deploy, is in [widget-workflow.md](widg
    cd frontend && bun run menus:check
    git add backend/core/src/main/resources/db/seed/system/R__seed_portal_menus.sql && git commit
    ```
-5. **CI/CD** builds and deploys as usual. On boot every environment applies the seed and core signs
-   the changed portals with that environment's own key. Locally, restarting core does the same.
+5. **CI/CD** builds and deploys as usual. On boot every environment applies the seed, and portals read
+   the published menus straight from core (`GET /api/ui/menus/{portal}`). Locally, restarting core does the same.
 
 ## What runs where
 
@@ -31,20 +31,18 @@ The whole widget lifecycle, from idea to deploy, is in [widget-workflow.md](widg
 | `frontend/src/portals/signed/preview.ts` | Dev-only preview. The portal draws the builder's layout from this browser. It is compiled out of production builds. Sign-in and every API permission check still apply. |
 | `scripts/export-portal-menus.sh` | Exports each portal's **newest** server layout (draft or published) and every ACTIVE widget into the seed. Fails if a menu places an unregistered widget. |
 | `R__seed_portal_menus.sql` | Flyway repeatable seed. **The repo wins**: each portal's published layout and the listed widgets are set to exactly this. Unchanged rows are not touched. |
-| `UiBundleBootSync` (core) | At boot it signs every portal whose bundle is missing, stale or signed by another key. Each signing is audited (`UI_BUNDLE_SIGNED_AT_BOOT`). A plain restart signs nothing. |
+| `PortalMenuService` (core) | Serves a portal's published layout plus the widgets that work in it. Read live on every request; nothing is signed or cached. |
 | `bun run menus:check` | CI gate. Checks that every seeded layout has the shape the portal accepts and that every placed widget is in the seed and in this build, at the same major version. |
 
 ## Good to know
 
 - **The review is the pull request.** Menu changes don't go through four-eyes approval. The seed is
-  reviewed code, and core signs it at boot under each environment's own key, so the browser's
-  tamper check still protects every portal.
+  reviewed code. Menus only steer navigation; core checks every API call a widget makes.
 - **The builder has no Publish or Export button.** Every edit autosaves to the server draft; the
   menu publisher ships it. **Discard my changes** puts the builder back to the menus that ship
   today (the published layout). A widget the system doesn't hold yet shows **Register** in the
   palette (the widget page has a **Register in the system** button too).
-- **Re-keyed an environment** (new pki)? Restart core. It re-signs every bundle its current key did
-  not sign. `bun run portal:check` / `portal:pin` still diagnose the browser's pinned key
-  (docs/ui-metadata-tampered.md).
+- **A portal that can't load its menus** says so and offers **Try again**; one with nothing published
+  says "No menu configured".
 - **Removing a widget from the code:** take it off every menu first, then export. `menus:check`
   fails the build if a menu still places it.

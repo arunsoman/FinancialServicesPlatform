@@ -1,24 +1,20 @@
 /**
- * Verify-then-render boot gate (plans/signed-portal-delivery-plan.md §3). Fetches the
- * portal's signed delivery bundle, verifies it OFFLINE against the build-pinned trust
- * store, parses the verified payload, and only then renders children — with the layout
- * on SignedLayoutCtx for the shell + layout screens. Any tamper evidence renders the
- * fail-closed TamperedBoundary — never a degraded menu, never a cached layout.
+ * Load-then-render boot gate. Fetches the portal's published menus from core, checks their shape,
+ * and only then renders children — with the layout on SignedLayoutCtx for the shell + layout
+ * screens. A load error shows "Couldn't load the menus" with a retry.
  *
- * Policy: a portal's menu comes ONLY from its published layout. A missing bundle renders
- * "No menu configured" for every portal — fail closed, never the build-time menu registry
- * (so a withheld delivery cannot downgrade a portal to a coded menu either).
+ * Policy: a portal's menu comes ONLY from its published layout. Nothing published renders
+ * "No menu configured" for every portal — never the build-time menu registry.
  *
- * Authentication comes first: bundle delivery is an authenticated read, so the gate only
- * verifies once a session exists. No session, or a 401 (token expired/revoked), forces
- * re-authentication through the hosted IdP sign-in (FAPI2 error-UX map: "invalid token →
- * force re-authentication") — never a tamper verdict, and nothing renders in between.
+ * Authentication comes first: the menus are an authenticated read, so the gate only loads once a
+ * session exists. No session, or a 401 (token expired/revoked), forces re-authentication through
+ * the hosted IdP sign-in (FAPI2 error-UX map: "invalid token → force re-authentication").
  *
  * Then the person's menu access (the Permissions Matrix cells their roles hold on this portal):
- * a submenu shows only with its ACTIVE cell. Unreadable access → no menu (fail closed).
+ * a submenu shows only with its ACTIVE cell. Unreadable access → no menu.
  *
  * Builder preview (LOCAL DEV ONLY, ./preview.ts): a tab opened by the builder draws the
- * builder's current, unsigned layout instead. Compiled out of production builds.
+ * builder's current layout instead. Compiled out of production builds.
  */
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -29,14 +25,12 @@ import { useSession } from '../shared/web-core/session-core';
 import { MenuAccessUnavailable } from './MenuAccessUnavailable';
 import { NoMenuConfigured } from './NoMenuConfigured';
 import { fetchMenuAccess } from './menu-access';
-import { TamperedBoundary } from './TamperedBoundary';
-import { verifyDelivery } from './delivery';
+import { MenusUnavailable } from './MenusUnavailable';
+import { loadMenus } from './delivery';
 import type { Delivery } from './delivery';
 import { PreviewBanner, PreviewEmpty } from './PreviewBanner';
 import { PREVIEW_ACCESS, previewActive, usePreviewLayout } from './preview';
 import { MenuAccessCtx, SignedLayoutCtx } from './signed-layout';
-import { reasonLabel } from './verify';
-import type { SignedBundle } from './verify';
 
 export interface SignedMenuGateProps {
   portal: string;
@@ -45,8 +39,8 @@ export interface SignedMenuGateProps {
   children: ReactNode;
 }
 
-async function fetchVerified(portal: string): Promise<Delivery> {
-  return verifyDelivery(portal, () => apiGet<SignedBundle>(`/api/ui/bundles/${encodeURIComponent(portal)}`));
+async function fetchMenus(portal: string): Promise<Delivery> {
+  return loadMenus(portal, () => apiGet<unknown>(`/api/ui/menus/${encodeURIComponent(portal)}`));
 }
 
 export function SignedMenuGate(props: SignedMenuGateProps): ReactNode {
@@ -55,13 +49,13 @@ export function SignedMenuGate(props: SignedMenuGateProps): ReactNode {
   // build-time constant first: production builds drop the whole preview branch
   const preview = import.meta.env.DEV && previewActive(props.portal);
   const previewLayout = usePreviewLayout(props.portal, preview);
-  const { data, isPending } = useQuery({
-    // per user: a new sign-in always re-verifies, never reuses another identity's verdict
-    queryKey: ['ui', 'signed-delivery', props.portal, session.user?.userId ?? null],
-    queryFn: () => fetchVerified(props.portal),
+  const { data, isPending, isError, refetch } = useQuery({
+    // per user: a new sign-in always reloads, never reuses another identity's menus
+    queryKey: ['ui', 'portal-menus', props.portal, session.user?.userId ?? null],
+    queryFn: () => fetchMenus(props.portal),
     enabled: authed && !preview,
     staleTime: 60_000,
-    retry: 0, // money-grade rule (ui-std §7): zero auto-retries — the outcome is surfaced
+    retry: 1, // an idempotent read (ui-std §7)
   });
   const access = useQuery({
     queryKey: ['ui', 'menu-access', props.portal, session.user?.userId ?? null],
@@ -84,11 +78,11 @@ export function SignedMenuGate(props: SignedMenuGateProps): ReactNode {
       </SignedLayoutCtx.Provider>
     );
   }
-  if (isPending || !data) return <FullscreenSpinner label="Verifying signed delivery" />;
-
-  if (data.kind === 'closed') {
-    return <TamperedBoundary portal={props.portal} reason={reasonLabel(data.reason)} evidenceId={data.evidenceId} />;
+  if (isError) {
+    return <MenusUnavailable label={props.label} detail="The server didn’t answer. Check your connection and try again." onRetry={() => void refetch()} />;
   }
+  if (isPending || !data) return <FullscreenSpinner label="Loading menus" />;
+  if (data.kind === 'invalid') return <MenusUnavailable label={props.label} detail={data.reason} onRetry={() => void refetch()} />;
   // no published layout → no menu, said plainly (never a build-time fallback menu)
   if (data.kind === 'missing') return <NoMenuConfigured label={props.label} />;
   if (access.data?.kind === 'reauth') return <Navigate to="/login" replace />;

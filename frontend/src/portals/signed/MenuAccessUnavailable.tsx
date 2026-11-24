@@ -1,6 +1,6 @@
 /**
- * The portal's menu verified, but the person's menu access could not be read — so nothing on the
- * menu can be shown (fail closed). Not a tamper verdict; retrying is safe (a read).
+ * The portal's menu loaded, but the person's menu access could not be read — so nothing on the
+ * menu can be shown (fail closed). Retrying is safe (a read).
  */
 import type { ReactNode } from 'react';
 

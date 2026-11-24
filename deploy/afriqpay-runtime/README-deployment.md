@@ -22,7 +22,7 @@ static IP — the TB Java client needs a literal IP, no DNS), `fsp-plugin-kyc` (
   docker-compose.afriqpay.yml        ← prod compose (network external, loopback-only ports)
   Dockerfile.runtime                 ← JRE-25 runtime image wrapping a prebuilt bootJar
   jars/*.jar                         ← bootJars built on the workstation (never build on server)
-  pki/                               ← idp-signing, gateway-assertion, ui-builder pair, plugin client/dpop keys
+  pki/                               ← idp-signing, gateway-assertion, plugin client/dpop keys
   init-dbs.sql                       ← creates fsp_plugin_{kyc,inventory} DBs+roles
   .env                               ← secrets (chmod 600, NEVER commit)
 ~/fsp-data/{postgres,tigerbeetle}    ← persistent volumes
@@ -60,7 +60,7 @@ static IP — the TB Java client needs a literal IP, no DNS), `fsp-plugin-kyc` (
   (SPRING_APPLICATION_JSON) set to `https://fsp-auth.afriqpay.com`; gateway baseUrl stays internal.
 - Host ports 8080/8082/8090 are taken by legacy stacks → FSP publishes to loopback 19080/19082/19090.
 - `SPRING_APPLICATION_JSON` used where the yml has no env placeholder
-  (core `fsp.tigerbeetle.addresses`, `fsp.ui.signing-key-path`, gateway `fsp.gateway.assertion-key`, BFF props).
+  (core `fsp.tigerbeetle.addresses`, gateway `fsp.gateway.assertion-key`, BFF props).
 - **Idempotency filter caches 4xx forever** — deterministic plugin keys poisoned by transient errors
   need `idempotency_records` purge (col `request_key`).
 
@@ -129,7 +129,7 @@ Fixes made while wiring the org portals:
 3. **Onboarding menu invisible on org portals**: `onboard.list`/`onboard.psp` were registered
    in `ui_widgets` with `portals = ["admin"]` only. Updated to
    `["admin","manufacturer","distributor","wholesaler"]` (SQL), then **republished** each org
-   layout ( maker: PUT draft + submit; checker: approve) so `ui_bundles` regenerated.
+   layout ( maker: PUT draft + submit; checker: approve) so the published layouts updated.
 
 Verified E2E on prod as org users: full nav (User Management, Organization, Onboarding, Role,
 Approvals, KYC > My organization + KYC applications, Inventory > Overview); "My organization"

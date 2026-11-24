@@ -8,7 +8,6 @@ public class FspProperties {
     private final Security security = new Security();
     private final TigerBeetle tigerbeetle = new TigerBeetle();
     private final Journal journal = new Journal();
-    private final Ui ui = new Ui();
     private final Push push = new Push();
     private final Email email = new Email();
     private final Sms sms = new Sms();
@@ -16,7 +15,6 @@ public class FspProperties {
     public Security getSecurity() { return security; }
     public TigerBeetle getTigerBeetle() { return tigerbeetle; }
     public Journal getJournal() { return journal; }
-    public Ui getUi() { return ui; }
     public Push getPush() { return push; }
     public Email getEmail() { return email; }
     public Sms getSms() { return sms; }
@@ -61,21 +59,6 @@ public class FspProperties {
 
         public boolean isForceUnknown() { return forceUnknown; }
         public void setForceUnknown(boolean v) { this.forceUnknown = v; }
-    }
-
-    /** Signed portal delivery (plans/signed-portal-delivery-plan.md). Private key is
-     *  mounted like the IdP signing key (AGENTS.md §7) — never shipped, never logged. */
-    public static class Ui {
-        private String signingKeyPath = "infrastructure/pki/dev/ui-builder-signing.pem";
-        private String signingKid = "ui-builder-dev-1";
-        private String alg = "ES256";
-
-        public String getSigningKeyPath() { return signingKeyPath; }
-        public void setSigningKeyPath(String v) { this.signingKeyPath = v; }
-        public String getSigningKid() { return signingKid; }
-        public void setSigningKid(String v) { this.signingKid = v; }
-        public String getAlg() { return alg; }
-        public void setAlg(String v) { this.alg = v; }
     }
 
     /** F-12 push notifications (docs/architecture/12-notifications-and-push.md). Channel

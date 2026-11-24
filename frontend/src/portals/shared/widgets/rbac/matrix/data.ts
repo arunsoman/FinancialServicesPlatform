@@ -10,8 +10,8 @@ export const sources: DataSources = {
   'rbac.matrix.catalog': { '*': { method: 'GET', path: '/api/permissions' } },
   /** the org → which portal its people sign in to (type + subType) */
   'rbac.matrix.org': { '*': { method: 'GET', path: '/api/tenants/{tenantId}' } },
-  /** that portal's SIGNED delivery bundle — verified in the browser before any row is drawn */
-  'rbac.matrix.menu': { '*': { method: 'GET', path: '/api/ui/bundles/{portal}' } },
+  /** that portal's published menus (core GET /v1/ui/menus/{portal}) */
+  'rbac.matrix.menu': { '*': { method: 'GET', path: '/api/ui/menus/{portal}' } },
   /** what the EDITOR holds on that portal's menu — only that can be granted (no escalation) */
   'rbac.matrix.access': { '*': { method: 'GET', path: '/api/me/menu-access?portal={portal}' } },
   /** Role Details selects: the org's ACTIVE units, server-sorted by name (AGENTS §2f) */
@@ -40,7 +40,7 @@ const catalog: PermissionDef[] = [
 /** The fixture org signs in to the manufacturer portal. */
 const org: OrgPortalView = { id: ROLES_ORG, type: 'TENANT', subType: 'MANUFACTURER' };
 
-/** That portal's PUBLISHED layout (payload shape core signs) — screens renamed from the coded
+/** That portal's PUBLISHED menus (the shape core serves) — screens renamed from the coded
  *  menu on purpose, so the workbench shows the matrix following the published menu. */
 const publishedLayout = (portal: string) => ({
   portal, schemaVersion: 1, layoutVersion: 'fixture-3', publishedAt: '2026-11-20T09:00:00Z',
