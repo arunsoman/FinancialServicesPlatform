@@ -38,6 +38,7 @@ timeline
     V40 : invoice permissions
     V41 : invoices
     V42 : drop signed portal delivery
+    V43 : idp refresh tokens
 
-**Next free migration number: V43.**
+**Next free migration number: V44.**
 ```

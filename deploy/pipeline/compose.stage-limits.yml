@@ -1,0 +1,97 @@
+# Staging-only overlay: the bare minimum CPU/RAM that keeps the stack alive, and nothing more.
+#
+# Three layers make sure staging can never hurt anything else on the host:
+#   1. Hard per-container ceilings (cpus / mem_limit, swap disabled, pids_limit).
+#   2. One parent cgroup for the whole stack — fsp-stage.slice (MemoryMax 4.5G, CPUQuota 150%,
+#      CPUWeight/IOWeight 20 vs default 100) — so the total is capped even if a ceiling is raised.
+#   3. Lowest priority under contention: cpu_shares 128 (default 1024) and oom_score_adj 500,
+#      so when the host is short of CPU or memory, staging yields and is OOM-killed first.
+#
+# Budget (sum of ceilings): 4.39 GiB RAM, 2.55 CPUs — inside the slice's 4.5 GiB / 1.5 CPUs.
+# Measured idle footprint (JDK 25, Spring Boot 4): metaspace 85-110 MiB, live heap < 150 MiB.
+# TigerBeetle allocates all its memory at start: ~1.5 GiB even in --development with a 64 MiB grid.
+#
+# JVM: Serial GC (no GC threads), C1 only (less RAM + CPU for JIT), 1 visible CPU, explicit heap,
+# exit on OOM so Docker restarts a clean process instead of a thrashing one.
+
+x-caps: &caps
+  cgroup_parent: ${FSP_SLICE:?}
+  cpu_shares: 128
+  oom_score_adj: 500
+  pids_limit: 256
+
+x-small-jvm: &small-jvm
+  <<: *caps
+  cpus: 0.35
+  mem_limit: 384m
+  memswap_limit: 384m
+  entrypoint: ["java", "-XX:+UseSerialGC", "-Xms32m", "-Xmx160m", "-XX:TieredStopAtLevel=1",
+               "-XX:ReservedCodeCacheSize=48m", "-XX:ActiveProcessorCount=1",
+               "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]
+
+x-small-jvm-env: &small-jvm-env
+  SERVER_TOMCAT_THREADS_MAX: "16"
+  SERVER_TOMCAT_THREADS_MIN_SPARE: "2"
+  SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "3"
+  SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "1"
+
+services:
+  postgres:
+    <<: *caps
+    cpus: 0.25
+    mem_limit: 256m
+    memswap_limit: 256m
+    shm_size: 64m
+    command: >
+      postgres -c shared_buffers=32MB -c effective_cache_size=96MB -c work_mem=2MB
+      -c maintenance_work_mem=16MB -c max_connections=40 -c wal_buffers=1MB
+      -c min_wal_size=64MB -c max_wal_size=256MB -c autovacuum_max_workers=1
+      -c max_worker_processes=2 -c max_parallel_workers=0 -c max_parallel_workers_per_gather=0
+
+  tigerbeetle-format:      # runs to completion BEFORE tigerbeetle starts — same budget, never both
+    <<: *caps
+    cpus: 0.25
+    mem_limit: 1800m        # format is OOM-killed at 256m (measured) and leaves a 0-byte data file
+    memswap_limit: 1800m
+
+  tigerbeetle:
+    <<: *caps
+    cpus: 0.25
+    mem_limit: 1800m
+    memswap_limit: 1800m
+
+  core:
+    <<: *caps
+    cpus: 0.5
+    mem_limit: 512m
+    memswap_limit: 512m
+    entrypoint: ["java", "-XX:+UseSerialGC", "-Xms64m", "-Xmx256m", "-XX:TieredStopAtLevel=1",
+                 "-XX:ReservedCodeCacheSize=48m", "-XX:ActiveProcessorCount=1",
+                 "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]
+    environment:
+      <<: *small-jvm-env
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "5"
+    healthcheck:
+      start_period: 180s   # 0.5 CPU: Flyway + Hibernate boot takes a few minutes
+
+  idp:
+    <<: *small-jvm
+    environment: *small-jvm-env
+
+  gateway:
+    <<: *small-jvm
+    environment: *small-jvm-env
+
+  bff:
+    <<: *small-jvm
+    environment: *small-jvm-env
+
+  plugin-kyc:
+    <<: *small-jvm
+    cpus: 0.25
+    environment: *small-jvm-env
+
+  plugin-inventory:
+    <<: *small-jvm
+    cpus: 0.25
+    environment: *small-jvm-env

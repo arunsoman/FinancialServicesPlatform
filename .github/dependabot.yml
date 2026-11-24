@@ -1,0 +1,26 @@
+# Weekly dependency updates, grouped so they arrive as a few reviewable PRs (into staging).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: staging
+    schedule: { interval: weekly }
+    groups: { actions: { patterns: ['*'] } }
+  - package-ecosystem: gradle
+    directory: /backend
+    target-branch: staging
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+  - package-ecosystem: bun
+    directory: /frontend
+    target-branch: staging
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+  - package-ecosystem: docker
+    directory: /deploy/afriqpay-runtime
+    target-branch: staging
+    schedule: { interval: weekly }

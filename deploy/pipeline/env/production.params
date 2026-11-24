@@ -1,0 +1,29 @@
+# Production — adopts the stack that was started by hand on 2026-11-19 WITHOUT moving anything:
+# same compose project (afriqpay-runtime), container names (fsp-*), network (fsp-network),
+# loopback ports, and the REAL data paths the running containers mount (~/fsp-data — NOT the
+# ./fsp-data the old compose file claims). Secrets + PKI stay where they are.
+FSP_ENV=production
+FSP_PROJECT=afriqpay-runtime
+FSP_PREFIX=fsp
+FSP_HOME=/home/ubuntu/fsp-deploy/production
+FSP_CONF_DIR=/home/ubuntu/apps/afriqpay-platform/deploy/afriqpay-runtime
+FSP_DATA_DIR=/home/ubuntu/fsp-data
+FSP_BACKUP_DIR=/home/ubuntu/fsp-backups/production
+FSP_BACKUP_KEEP=14
+FSP_NETWORK=fsp-network
+FSP_NETWORK_SUBNET=10.200.0.0/16
+FSP_TB_IP=10.200.0.10
+FSP_TB_FORMAT_FLAGS=
+FSP_TB_START_FLAGS=
+FSP_PORT_BFF=19080
+FSP_PORT_IDP=19082
+FSP_PORT_GATEWAY=19090
+FSP_PUBLIC_HOST=fsp.afriqpay.com
+FSP_AUTH_HOST=fsp-auth.afriqpay.com
+FSP_API_HOST=fsp-api.afriqpay.com
+FSP_WEB_ROOT=/var/www/fsp.afriqpay.com/html
+FSP_OVERLAYS=
+FSP_SLICE=
+FSP_WAIT_SECONDS=900
+# refuse to start if the Postgres / TigerBeetle data is missing — never boot prod on an empty DB
+FSP_REQUIRE_EXISTING_DATA=1

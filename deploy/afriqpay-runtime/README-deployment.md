@@ -1,5 +1,8 @@
 # FSP Production Deployment — web.afriqpay.com
 
+> **Superseded (2026-11-24):** deployments now run through GitHub Actions — see
+> [deploy/pipeline/README.md](../pipeline/README.md). This file is the history of the hand-made stack.
+
 **Deployed:** 2026-11-19 · Docker network `fsp-network` (10.200.0.0/16) · TLS via certbot (LE)
 
 ## Topology
@@ -32,7 +35,7 @@ static IP — the TB Java client needs a literal IP, no DNS), `fsp-plugin-kyc` (
 ## Secrets (.env)
 
 - `POSTGRES_PASSWORD` — DB superuser
-- `FSP_BOOTSTRAP_PASSWORD` — bootstrap password; **actual prod passwords (reset 2026-11-19): `platform-admin` / `admin-checker` = `admin123`**
+- `FSP_BOOTSTRAP_PASSWORD` — bootstrap password (value lives only in the server `.env`; never write passwords in this file)
 - `FSP_INTERNAL_CREDENTIAL` — internal-hop credential (gateway/core)
 - `FSP_PERSON_PASSWORD` — default person password
 - `FSP_PLUGIN_*_DB_PASSWORD` — plugin DB roles
@@ -73,7 +76,7 @@ static IP — the TB Java client needs a literal IP, no DNS), `fsp-plugin-kyc` (
 
 ## Bootstrap done on prod (2026-11-19)
 
-- Passwords: `platform-admin` + `admin-checker` both reset to `admin123` (bcrypt `$2a$10$`, F-8 flag cleared).
+- Passwords: `platform-admin` + `admin-checker` reset (F-8 flag cleared) — values redacted; **rotate: they were committed in plain text before 2026-11-24**.
 - Widget registry: all 16 widgets registered (PUT `/api/ui/widgets`, `bundleSha256` omitted = NULL, same as local).
 - Admin portal layout: draft copied from local (v37) → PUT draft → submit → approved by `admin-checker`
   → JWS bundle published (`kid: ui-builder-dev-1`). `/admin/` renders; `/widget-workbench/` serves.
@@ -110,7 +113,7 @@ static IP — the TB Java client needs a literal IP, no DNS), `fsp-plugin-kyc` (
 ## Org-portal bootstrap & fixes (2026-11-19, evening)
 
 Three dummy organizations seeded on prod (AfriqTex Manufacturers / Kavango Distribution /
-Etosha Wholesale Supplies), each with maker+checker+admin users (password `admin123`),
+Etosha Wholesale Supplies), each with maker+checker+admin users (password redacted — rotate),
 ORG_* roles with permission grants, an ACTIVE NAD book, a settlement bank account,
 kyc + inventory plugin installs (ACTIVE), and a SUBMITTED dummy KYC case.
 

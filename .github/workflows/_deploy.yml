@@ -1,0 +1,132 @@
+# Ship a release bundle to the server and run deploy/pipeline/scripts/deploy.sh there.
+# Used by deliver.yml (new releases) and rollback.yml (re-deploy an earlier tag).
+#
+# Environment-scoped secrets (Settings → Environments → staging / production):
+#   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS
+# `production` must have "Required reviewers" (someone other than the person who merged) —
+# that is the four-eyes gate on every production change, rollbacks included.
+name: deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }        # staging | production
+      mode:        { type: string, default: deploy }       # deploy | rollback
+      ref:         { type: string, default: '' }           # git ref the deploy bundle comes from
+      release_name: { type: string, default: '' }         # empty → <stage|prod>-YYYY.MM.DD-<run>
+      create_tag:  { type: boolean, default: true }
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.environment == 'production' && 'https://fsp.afriqpay.com' || 'https://fsp.stage.afriqpay.com' }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: write   # push the release tag / GitHub release
+      packages: read    # short-lived GHCR pull token for the server
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      MODE: ${{ inputs.mode }}
+      RELEASE_NAME_INPUT: ${{ inputs.release_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-env
+          path: .release
+
+      - name: Release name
+        id: r
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in staging) prefix=stage ;; production) prefix=prod ;; *) echo "bad environment"; exit 1 ;; esac
+          case "$MODE" in deploy|rollback) ;; *) echo "bad mode"; exit 1 ;; esac
+          name="${RELEASE_NAME_INPUT:-$prefix-$(date -u +%Y.%m.%d)-$GITHUB_RUN_NUMBER}"
+          [ "$GITHUB_RUN_ATTEMPT" = 1 ] || [ -n "$RELEASE_NAME_INPUT" ] || name="$name.$GITHUB_RUN_ATTEMPT"
+          [[ "$name" =~ ^[a-z0-9][a-z0-9._-]{2,80}$ ]] || { echo "invalid release name: $name"; exit 1; }
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble bundle
+        run: |
+          set -euo pipefail
+          mkdir -p bundle
+          cp deploy/pipeline/compose*.yml bundle/
+          cp "deploy/pipeline/env/$ENVIRONMENT.params" bundle/params.env
+          cp .release/release.env bundle/release.env
+          cp -r deploy/pipeline/initdb deploy/pipeline/scripts bundle/
+          echo "FSP_HOME=$(grep '^FSP_HOME=' bundle/params.env | cut -d= -f2)" >> "$GITHUB_ENV"
+
+      - name: SSH identity
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?missing secret}" "${DEPLOY_USER:?}" "${DEPLOY_SSH_KEY:?}" "${DEPLOY_KNOWN_HOSTS:?}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host fsp-target
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ServerAliveInterval 30
+          EOF
+
+      - name: Ship bundle + deploy (${{ inputs.mode }})
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NAME: ${{ steps.r.outputs.name }}
+        run: |
+          set -euo pipefail
+          dest="$FSP_HOME/releases/$NAME"    # validated: [a-z0-9._-] only, no shell metacharacters
+          rsync -a --delete --mkpath bundle/ "fsp-target:$dest/"
+          # shellcheck disable=SC2029  # expanded on the runner on purpose; token goes over stdin
+          printf '%s\n' "$GHCR_TOKEN" \
+            | ssh fsp-target env GHCR_USER="$GITHUB_ACTOR" bash "$dest/scripts/deploy.sh" "$dest" "$NAME" "$MODE"
+
+      - name: Tag release
+        if: inputs.create_tag && inputs.mode == 'deploy'
+        env:
+          NAME: ${{ steps.r.outputs.name }}
+          COMMIT: ${{ steps.r.outputs.commit }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NAME" -m "$ENVIRONMENT release $NAME" -m "$(cat .release/release.env)" "$COMMIT"
+          git push origin "refs/tags/$NAME"
+          if [ "$ENVIRONMENT" = production ]; then
+            { echo "Deployed to production by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              echo; echo "Roll back to this release: Actions → rollback → environment=production, tag=$NAME"
+              echo; echo '```'; cat .release/release.env; echo '```'; } > notes.md
+            gh release create "$NAME" --verify-tag --title "$NAME" --notes-file notes.md
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          NAME: ${{ steps.r.outputs.name }}
+        run: |
+          {
+            echo "### $ENVIRONMENT — $MODE \`$NAME\` — ${{ job.status }}"
+            echo "Roll back to any earlier release: **Actions → rollback** with its tag."
+          } >> "$GITHUB_STEP_SUMMARY"

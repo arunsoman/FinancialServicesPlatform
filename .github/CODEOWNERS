@@ -1,0 +1,14 @@
+# Review routing. With branch protection "Require review from Code Owners", nothing below merges
+# without an owner's approval. Add a second maintainer to make maker ≠ checker real for code.
+*                                   @arunsoman
+# FAPI 2.0 trust boundary (AGENTS.md §1)
+/backend/idp/                       @arunsoman
+/backend/gateway/                   @arunsoman
+/backend/bff/                       @arunsoman
+# money, schema, ledger
+/backend/core/src/main/resources/db/ @arunsoman
+# portal menus ship as code (AGENTS.md §2.1 exception — the PR review IS the approval)
+**/R__seed_portal_menus.sql         @arunsoman
+# the pipeline itself
+/.github/                           @arunsoman
+/deploy/                            @arunsoman

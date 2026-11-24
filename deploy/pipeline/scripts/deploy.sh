@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+# FSP deploy — runs ON THE SERVER, called by GitHub Actions over SSH (.github/workflows/_deploy.yml).
+#
+#   deploy.sh <bundle-dir> <release-name> [deploy|rollback|auto-rollback]
+#
+# <bundle-dir> is self-contained: compose files, params.env, release.env (image digests),
+# initdb/, scripts/. It is kept under $FSP_HOME/releases/<release-name>, so any earlier release
+# can be re-applied exactly — that is what rollback (manual or automatic) does.
+#
+# A GHCR read token may be passed on stdin; it is used with a throw-away DOCKER_CONFIG so the
+# host's own docker logins (other stacks) are never touched.
+#
+# Guarantees (each one is a preflight check that aborts BEFORE anything changes):
+#   * never touches a container, port, or network that belongs to another compose project
+#   * production never boots on an empty data directory
+#   * a normal deploy never runs a release whose migrations are older than the database
+#     (that means main is behind what is live — use the rollback workflow if it is intentional)
+#   * staging only starts inside its capped cgroup slice
+set -Eeuo pipefail
+
+BUNDLE="$(cd "${1:?bundle dir}" && pwd)"
+RELEASE="${2:?release name}"
+MODE="${3:-deploy}"
+case "$MODE" in deploy|rollback|auto-rollback) ;; *) echo "bad mode: $MODE" >&2; exit 2 ;; esac
+
+set -a
+# shellcheck source=/dev/null
+. "$BUNDLE/params.env"
+# shellcheck source=/dev/null
+. "$BUNDLE/release.env"
+set +a
+
+log() { printf '%s [%s] %s\n' "$(date -u +%H:%M:%S)" "$FSP_ENV" "$*"; }
+die() { log "ABORT: $*"; exit 1; }
+
+SERVICES=(postgres tigerbeetle core idp gateway bff plugin-kyc plugin-inventory)
+container() { # service -> container name
+  case "$1" in tigerbeetle-format) echo "$FSP_PREFIX-tb-format" ;; *) echo "$FSP_PREFIX-$1" ;; esac
+}
+
+GHCR_TOKEN=""
+if [ ! -t 0 ]; then IFS= read -r GHCR_TOKEN || true; fi
+
+mkdir -p "$FSP_HOME/releases" "$FSP_HOME/initdb" "$FSP_BACKUP_DIR"
+exec 9>"$FSP_HOME/.deploy.lock"
+flock -n 9 || die "another deploy of $FSP_ENV is running"
+
+OVERLAY_ARGS=()
+for o in $FSP_OVERLAYS; do OVERLAY_ARGS+=(-f "$BUNDLE/$o"); done
+compose() {
+  docker compose -p "$FSP_PROJECT" --project-directory "$BUNDLE" \
+    -f "$BUNDLE/compose.yml" "${OVERLAY_ARGS[@]}" \
+    --env-file "$FSP_CONF_DIR/.env" --env-file "$BUNDLE/params.env" --env-file "$BUNDLE/release.env" \
+    "$@"
+}
+
+# ---------------------------------------------------------------------------------------------
+preflight() {
+  log "preflight ($MODE $RELEASE)"
+  docker compose version --short | awk -F. '{ exit !($1 > 2 || ($1 == 2 && $2 >= 20)) }' \
+    || die "docker compose >= 2.20 required"
+
+  [ -s "$FSP_CONF_DIR/.env" ] || die "missing secrets file $FSP_CONF_DIR/.env (run stage-bootstrap.sh for staging)"
+  for k in idp-signing gateway-assertion plugin-kyc-client plugin-kyc-dpop plugin-inventory-client plugin-inventory-dpop; do
+    [ -s "$FSP_CONF_DIR/pki/$k.pem" ] || die "missing key $FSP_CONF_DIR/pki/$k.pem"
+  done
+  compose config --quiet || die "compose config invalid (missing secret or digest?)"
+
+  if [ "$FSP_REQUIRE_EXISTING_DATA" = 1 ]; then
+    docker run --rm --network none -v "$FSP_DATA_DIR:/d:ro" postgres:17-alpine \
+      sh -c 'test -s /d/postgres/PG_VERSION && test -s /d/tigerbeetle/0_0.tigerbeetle' \
+      || die "no existing Postgres/TigerBeetle data under $FSP_DATA_DIR — refusing to boot $FSP_ENV empty"
+  else
+    mkdir -p "$FSP_DATA_DIR/postgres" "$FSP_DATA_DIR/tigerbeetle"
+  fi
+
+  docker network inspect "$FSP_NETWORK" >/dev/null 2>&1 || die "network $FSP_NETWORK missing"
+  local subnet; subnet="$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}' "$FSP_NETWORK")"
+  [ "$subnet" = "$FSP_NETWORK_SUBNET" ] || die "network $FSP_NETWORK has subnet $subnet, expected $FSP_NETWORK_SUBNET"
+
+  if [ -n "${FSP_SLICE:-}" ]; then
+    [ "$(systemctl show "$FSP_SLICE" -p LoadState --value)" = loaded ] || die "cgroup slice $FSP_SLICE not installed"
+    local mm; mm="$(systemctl show "$FSP_SLICE" -p MemoryMax --value)"
+    [ -n "$mm" ] && [ "$mm" != infinity ] || die "slice $FSP_SLICE has no MemoryMax — staging would be uncapped"
+  fi
+
+  # every container name we are about to use is either free or already ours
+  local svc name proj
+  for svc in "${SERVICES[@]}" tigerbeetle-format; do
+    name="$(container "$svc")"
+    proj="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$name" 2>/dev/null || true)"
+    if docker inspect "$name" >/dev/null 2>&1 && [ "$proj" != "$FSP_PROJECT" ]; then
+      die "container $name exists but belongs to project '$proj' — not ours, not touching it"
+    fi
+  done
+
+  # every loopback port we publish is either free or held by our own container
+  local spec port owner
+  for spec in "$FSP_PORT_BFF:bff" "$FSP_PORT_IDP:idp" "$FSP_PORT_GATEWAY:gateway"; do
+    port="${spec%%:*}"; svc="${spec#*:}"
+    if ss -ltnH "sport = :$port" | grep -q .; then
+      owner="$(docker ps --filter "publish=$port" --format '{{.Names}}' | head -1)"
+      [ "$owner" = "$(container "$svc")" ] || die "port $port is in use by '${owner:-a host process}'"
+    fi
+  done
+
+  local avail_kb; avail_kb="$(df -Pk "$FSP_HOME" | awk 'NR==2 {print $4}')"
+  [ "$avail_kb" -gt $((5 * 1024 * 1024)) ] || die "less than 5 GiB free disk"
+
+  if [ "$MODE" = deploy ] && [ -n "${FSP_RELEASE_MAX_MIGRATION:-}" ] && running postgres; then
+    local dbv
+    dbv="$(docker exec "$(container postgres)" psql -U fsp -d fsp -Atc \
+      "select version from flyway_schema_history where success and version is not null" 2>/dev/null | sort -V | tail -1 || true)"
+    if [ -n "$dbv" ] && [ "$(printf '%s\n%s\n' "$dbv" "$FSP_RELEASE_MAX_MIGRATION" | sort -V | tail -1)" != "$FSP_RELEASE_MAX_MIGRATION" ]; then
+      die "database is at migration V$dbv but this release only knows V$FSP_RELEASE_MAX_MIGRATION — the branch is behind what is live. Use the rollback workflow if going back is intended."
+    fi
+  fi
+}
+
+running() { [ "$(docker inspect -f '{{.State.Running}}' "$(container "$1")" 2>/dev/null)" = true ]; }
+
+# ---------------------------------------------------------------------------------------------
+# First pipeline deploy over a hand-made stack: snapshot what runs now as release "pre-pipeline"
+# so even the very first deploy can roll back automatically.
+snapshot_pre_pipeline() {
+  [ -e "$FSP_HOME/current" ] && return 0
+  running core || return 0
+  local snap="$FSP_HOME/releases/pre-pipeline"
+  [ -d "$snap" ] && return 0
+  log "no pipeline release yet — snapshotting the running stack as 'pre-pipeline'"
+  mkdir -p "$snap"
+  cp -a "$BUNDLE/." "$snap/"
+  {
+    echo "# images of the hand-deployed stack, captured $(date -u +%FT%TZ)"
+    local svc var id
+    for svc in core idp gateway bff plugin-kyc plugin-inventory; do
+      var="FSP_IMAGE_$(echo "${svc#plugin-}" | tr 'a-z-' 'A-Z_')"
+      id="$(docker inspect -f '{{.Image}}' "$(container "$svc")")"
+      docker tag "$id" "fsp-pre-pipeline/$svc:snapshot"
+      echo "$var=fsp-pre-pipeline/$svc:snapshot"
+    done
+    echo "FSP_WEB_SOURCE_DIR=$snap/web"
+    echo "FSP_RELEASE_MAX_MIGRATION="
+  } > "$snap/release.env"
+  mkdir -p "$snap/web" && rsync -a "$FSP_WEB_ROOT/" "$snap/web/"
+  ln -sfn "$snap" "$FSP_HOME/current"
+}
+
+pull_images() {
+  local cfg img rc=0; cfg="$(mktemp -d)"
+  if [ -n "$GHCR_TOKEN" ]; then
+    printf '%s' "$GHCR_TOKEN" | DOCKER_CONFIG="$cfg" docker login ghcr.io -u "${GHCR_USER:-fsp-deploy}" --password-stdin >/dev/null
+  fi
+  for img in $(compose config --images | sort -u) ${FSP_IMAGE_WEB:-}; do
+    docker image inspect "$img" >/dev/null 2>&1 && continue   # digest-pinned or already present
+    log "pull $img"
+    DOCKER_CONFIG="$cfg" docker pull -q "$img" >/dev/null || { rc=1; break; }
+  done
+  rm -rf "$cfg"                                               # the token never outlives the pull
+  [ $rc -eq 0 ] || die "image pull failed"
+}
+
+backup_db() {
+  running postgres || { log "no running postgres — nothing to back up"; return 0; }
+  local f; f="$FSP_BACKUP_DIR/$(date -u +%Y%m%dT%H%M%SZ)-before-${RELEASE}.sql.gz"
+  log "backup → $f"
+  if ! docker exec "$(container postgres)" pg_dumpall -U fsp | gzip -6 > "$f.part"; then
+    rm -f "$f.part"; die "pg_dumpall failed"
+  fi
+  mv "$f.part" "$f"
+  ls -1t "$FSP_BACKUP_DIR"/*.sql.gz 2>/dev/null | tail -n +"$((FSP_BACKUP_KEEP + 1))" | xargs -r rm -f
+}
+
+wait_healthy() {
+  local deadline=$(( $(date +%s) + FSP_WAIT_SECONDS )) svc st pending
+  while :; do
+    pending=()
+    for svc in "${SERVICES[@]}"; do
+      st="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$(container "$svc")" 2>/dev/null || echo missing)"
+      case "$st" in
+        healthy|running) ;;
+        unhealthy|exited|dead|missing) docker logs --tail 40 "$(container "$svc")" 2>&1 | sed 's/^/    | /' || true
+                                       die "$svc is $st" ;;
+        *) pending+=("$svc:$st") ;;
+      esac
+    done
+    [ ${#pending[@]} -eq 0 ] && { log "all services healthy"; return 0; }
+    [ "$(date +%s)" -lt "$deadline" ] || die "timed out waiting for: ${pending[*]}"
+    sleep 10
+  done
+}
+
+publish_web() {
+  local tmp; tmp="$(mktemp -d)"
+  if [ -n "${FSP_IMAGE_WEB:-}" ]; then
+    local cid; cid="$(docker create "$FSP_IMAGE_WEB")"
+    docker cp -q "$cid:/site/." "$tmp/"; docker rm "$cid" >/dev/null
+  else
+    rsync -a "${FSP_WEB_SOURCE_DIR:?no web source}/" "$tmp/"
+  fi
+  [ -s "$tmp/index.html" ] && [ -s "$tmp/admin.html" ] || { rm -rf "$tmp"; die "web bundle incomplete (index.html/admin.html)"; }
+  mkdir -p "$FSP_WEB_ROOT"
+  # assets first (hashed names, additive), HTML entry points last — open tabs keep their chunks
+  rsync -a --exclude '*.html' "$tmp/" "$FSP_WEB_ROOT/"
+  rsync -a --include '*.html' --exclude '*' "$tmp/" "$FSP_WEB_ROOT/"
+  find "$FSP_WEB_ROOT/assets" -type f -mtime +14 -delete 2>/dev/null || true
+  rm -rf "$tmp"
+  log "web published to $FSP_WEB_ROOT"
+}
+
+smoke() {
+  log "smoke checks"
+  curl -fsS --max-time 10 "http://127.0.0.1:$FSP_PORT_IDP/.well-known/openid-configuration" | grep -q "$FSP_AUTH_HOST" \
+    || die "idp discovery does not advertise https://$FSP_AUTH_HOST"
+  curl -fsS --max-time 10 -o /dev/null "http://127.0.0.1:$FSP_PORT_GATEWAY/.well-known/fsp-actor-jwks" || die "gateway JWKS"
+  curl -fsS --max-time 20 -o /dev/null "http://127.0.0.1:$FSP_PORT_BFF/bff/csrf" || die "bff → gateway → idp chain (/bff/csrf)"
+  curl -fsS --max-time 20 -o /dev/null "https://$FSP_PUBLIC_HOST/" || die "https://$FSP_PUBLIC_HOST/ not serving"
+  curl -fsS --max-time 20 -o /dev/null "https://$FSP_PUBLIC_HOST/bff/csrf" || die "https://$FSP_PUBLIC_HOST/bff/csrf"
+  curl -fsS --max-time 20 -o /dev/null "https://$FSP_AUTH_HOST/.well-known/openid-configuration" || die "https://$FSP_AUTH_HOST"
+}
+
+prune_images() {
+  # Only OUR images, only ones no release we keep refers to; `docker rmi` without -f can never
+  # remove an image a container (ours or anyone's) is using.
+  [ -n "${FSP_REGISTRY:-}" ] || return 0
+  local keep; keep="$(ls -1dt "$FSP_HOME"/releases/*/ 2>/dev/null | head -5 | xargs -r -I{} cat {}release.env | grep -o "$FSP_REGISTRY/[^ ]*" || true)"
+  docker images --digests --format '{{.Repository}}@{{.Digest}}' | grep "^$FSP_REGISTRY/fsp-" | while read -r ref; do
+    grep -qxF "$ref" <<<"$keep" || docker rmi "$ref" >/dev/null 2>&1 || true
+  done
+}
+
+auto_rollback() {
+  local rc=$?
+  trap - ERR EXIT
+  [ $rc -eq 0 ] && return 0
+  [ "$MODE" = auto-rollback ] && { log "auto-rollback itself failed — manual intervention needed"; exit $rc; }
+  [ "${CHANGED:-0}" = 1 ] || exit $rc       # failed in preflight: nothing was touched
+  local prev="${PREVIOUS:-}"
+  if [ -z "$prev" ] || [ ! -d "$prev" ]; then log "no previous release to roll back to"; exit $rc; fi
+  log "deploy of $RELEASE FAILED — rolling back to $(basename "$prev")"
+  flock -u 9
+  "$prev/scripts/deploy.sh" "$prev" "$(basename "$prev")" auto-rollback </dev/null || true
+  exit $rc
+}
+
+# ---------------------------------------------------------------------------------------------
+preflight
+snapshot_pre_pipeline
+PREVIOUS="$(readlink -f "$FSP_HOME/current" 2>/dev/null || true)"
+[ "$PREVIOUS" = "$BUNDLE" ] && PREVIOUS=""
+trap auto_rollback EXIT
+
+pull_images
+cp -a "$BUNDLE/initdb/." "$FSP_HOME/initdb/"
+backup_db
+
+CHANGED=1
+log "starting $FSP_PROJECT @ $RELEASE"
+compose up -d --pull never
+wait_healthy
+publish_web
+smoke
+
+ln -sfn "$BUNDLE" "$FSP_HOME/current"
+echo "$(date -u +%FT%TZ) $MODE $RELEASE" >> "$FSP_HOME/deploy-history.log"
+trap - EXIT
+prune_images || true
+log "DONE — $FSP_ENV is running $RELEASE"

@@ -1,0 +1,233 @@
+# FSP runtime stack — ONE file for every environment (staging, production).
+#
+# Values come from three places, merged by deploy.sh (later wins):
+#   1. <conf>/.env                 secrets — live only on the server, never in git, never in CI
+#   2. env/<environment>.params    per-environment, non-secret (names, ports, hosts, paths)
+#   3. release.env                 image digests of the release being deployed (immutable)
+#
+# Staging adds compose.stage-limits.yml on top (CPU/RAM caps). Production runs without caps,
+# exactly like the hand-made stack it replaces (same container names, network, data paths).
+#
+# Never run this by hand with `docker compose up`: deploy.sh runs the preflight checks that stop
+# it from starting on an empty data directory or colliding with another stack on the host.
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }   # container logs can never fill the disk
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: ${FSP_PREFIX:?}-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fsp
+      POSTGRES_USER: fsp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      # read by initdb/10-fsp-plugin-dbs.sh — only ever runs on an EMPTY data directory
+      FSP_PLUGIN_KYC_DB_PASSWORD: ${FSP_PLUGIN_KYC_DB_PASSWORD:-}
+      FSP_PLUGIN_INVENTORY_DB_PASSWORD: ${FSP_PLUGIN_INVENTORY_DB_PASSWORD:-}
+    volumes:
+      - ${FSP_DATA_DIR:?}/postgres:/var/lib/postgresql/data
+      - ${FSP_HOME:?}/initdb:/docker-entrypoint-initdb.d:ro
+    networks: [fsp]
+    security_opt: [seccomp=unconfined]
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fsp -d fsp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  tigerbeetle-format:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9
+    container_name: ${FSP_PREFIX}-tb-format
+    security_opt: [seccomp=unconfined]
+    networks: [fsp]
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "if [ -e /data/0_0.tigerbeetle ] && [ ! -s /data/0_0.tigerbeetle ]; then rm -f /data/0_0.tigerbeetle; fi;
+       if [ -s /data/0_0.tigerbeetle ]; then echo 'tb already formatted'; else
+       /tigerbeetle format ${FSP_TB_FORMAT_FLAGS:-} --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle; fi"
+    volumes:
+      - ${FSP_DATA_DIR}/tigerbeetle:/data
+    logging: *logging
+    restart: "no"
+
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9
+    container_name: ${FSP_PREFIX}-tigerbeetle
+    security_opt: [seccomp=unconfined]   # io_uring
+    networks:
+      fsp:
+        ipv4_address: ${FSP_TB_IP:?}     # the TB Java client needs a literal IP
+    command: "start ${FSP_TB_START_FLAGS:-} --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle"
+    volumes:
+      - ${FSP_DATA_DIR}/tigerbeetle:/data
+    depends_on:
+      tigerbeetle-format: { condition: service_completed_successfully }
+    logging: *logging
+    restart: unless-stopped
+
+  core:
+    image: ${FSP_IMAGE_CORE:?release.env must pin core}
+    container_name: ${FSP_PREFIX}-core
+    restart: unless-stopped
+    security_opt: [seccomp=unconfined]   # TigerBeetle Java client uses io_uring
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fsp
+      SPRING_DATASOURCE_USERNAME: fsp
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      FSP_BOOTSTRAP_PASSWORD: ${FSP_BOOTSTRAP_PASSWORD:?}
+      FSP_INTERNAL_CREDENTIAL: ${FSP_INTERNAL_CREDENTIAL:?}
+      FSP_PERSON_PASSWORD: ${FSP_PERSON_PASSWORD:?}
+      SPRING_APPLICATION_JSON: '{"fsp":{"tigerbeetle":{"addresses":"${FSP_TB_IP}:3000"},"gateway":{"actor-jwks-url":"http://gateway:8090/.well-known/fsp-actor-jwks"}}}'
+    volumes:
+      - ${FSP_CONF_DIR:?}/pki:/opt/fsp/pki:ro
+    networks: [fsp]
+    depends_on:
+      postgres: { condition: service_healthy }
+      tigerbeetle: { condition: service_started }
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  idp:
+    image: ${FSP_IMAGE_IDP:?release.env must pin idp}
+    container_name: ${FSP_PREFIX}-idp
+    restart: unless-stopped
+    environment:
+      FSP_DB_URL: jdbc:postgresql://postgres:5432/fsp
+      FSP_DB_USER: fsp
+      FSP_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      FSP_IDP_ISSUER: https://${FSP_AUTH_HOST:?}
+      FSP_IDP_SIGNING_KEY: /opt/fsp/pki/idp-signing.pem
+      FSP_INTERNAL_CREDENTIAL: ${FSP_INTERNAL_CREDENTIAL}
+    volumes:
+      - ${FSP_CONF_DIR}/pki:/opt/fsp/pki:ro
+    ports:
+      - "127.0.0.1:${FSP_PORT_IDP:?}:8082"
+    networks: [fsp]
+    depends_on:
+      core: { condition: service_healthy }   # idp validates the schema core's Flyway just migrated
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082/.well-known/openid-configuration >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  gateway:
+    image: ${FSP_IMAGE_GATEWAY:?release.env must pin gateway}
+    container_name: ${FSP_PREFIX}-gateway
+    restart: unless-stopped
+    environment:
+      FSP_CORE_URL: http://core:8081
+      FSP_IDP_URL: http://idp:8082
+      FSP_IDP_ISSUER: https://${FSP_AUTH_HOST}
+      FSP_INTERNAL_CREDENTIAL: ${FSP_INTERNAL_CREDENTIAL}
+      SPRING_APPLICATION_JSON: '{"fsp":{"gateway":{"assertion-key":"/opt/fsp/pki/gateway-assertion.pem","assertion-key-create":false}}}'
+    volumes:
+      - ${FSP_CONF_DIR}/pki:/opt/fsp/pki:ro
+    ports:
+      - "127.0.0.1:${FSP_PORT_GATEWAY:?}:8090"
+    networks: [fsp]
+    depends_on:
+      core: { condition: service_healthy }
+      idp: { condition: service_healthy }
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/.well-known/fsp-actor-jwks >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  bff:
+    image: ${FSP_IMAGE_BFF:?release.env must pin bff}
+    container_name: ${FSP_PREFIX}-bff
+    restart: unless-stopped
+    environment:
+      FSP_GATEWAY_URL: http://gateway:8090
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fsp
+      SPRING_DATASOURCE_USERNAME: fsp
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_APPLICATION_JSON: '{"server":{"servlet":{"session":{"cookie":{"secure":true}}}},"fsp":{"idp-issuer":"https://${FSP_AUTH_HOST}","login-redirect-uri":"https://${FSP_PUBLIC_HOST:?}/bff/auth/callback","authorize-url-base":"https://${FSP_AUTH_HOST}"}}'
+    ports:
+      - "127.0.0.1:${FSP_PORT_BFF:?}:8080"
+    networks: [fsp]
+    depends_on:
+      postgres: { condition: service_healthy }
+      gateway: { condition: service_healthy }
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8080 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  plugin-kyc:
+    image: ${FSP_IMAGE_KYC:?release.env must pin kyc}
+    container_name: ${FSP_PREFIX}-plugin-kyc
+    restart: unless-stopped
+    environment:
+      FSP_PLUGIN_KYC_DB_URL: jdbc:postgresql://postgres:5432/fsp_plugin_kyc
+      FSP_PLUGIN_KYC_DB_USER: fsp_plugin_kyc
+      FSP_PLUGIN_KYC_DB_PASSWORD: ${FSP_PLUGIN_KYC_DB_PASSWORD:?}
+      SERVER_PORT: 8083
+      FSP_GATEWAY_URL: http://gateway:8090
+      FSP_IDP_ISSUER: https://${FSP_AUTH_HOST}
+      FSP_PLUGIN_KYC_CLIENT_KEY: /opt/fsp/pki/plugin-kyc-client.pem
+      FSP_PLUGIN_KYC_DPOP_KEY: /opt/fsp/pki/plugin-kyc-dpop.pem
+      FSP_PLUGIN_KYC_CREATE_KEYS: "false"
+    volumes:
+      - ${FSP_CONF_DIR}/pki:/opt/fsp/pki:ro
+    networks: [fsp]
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8083 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  plugin-inventory:
+    image: ${FSP_IMAGE_INVENTORY:?release.env must pin inventory}
+    container_name: ${FSP_PREFIX}-plugin-inventory
+    restart: unless-stopped
+    environment:
+      FSP_PLUGIN_INVENTORY_DB_URL: jdbc:postgresql://postgres:5432/fsp_plugin_inventory
+      FSP_PLUGIN_INVENTORY_DB_USER: fsp_plugin_inventory
+      FSP_PLUGIN_INVENTORY_DB_PASSWORD: ${FSP_PLUGIN_INVENTORY_DB_PASSWORD:?}
+      SERVER_PORT: 8084
+      FSP_GATEWAY_URL: http://gateway:8090
+      FSP_IDP_ISSUER: https://${FSP_AUTH_HOST}
+      FSP_PLUGIN_INVENTORY_KEK: ${FSP_PLUGIN_INVENTORY_KEK:?}
+      FSP_PLUGIN_INVENTORY_CLIENT_KEY: /opt/fsp/pki/plugin-inventory-client.pem
+      FSP_PLUGIN_INVENTORY_DPOP_KEY: /opt/fsp/pki/plugin-inventory-dpop.pem
+      FSP_PLUGIN_INVENTORY_CREATE_KEYS: "false"
+    volumes:
+      - ${FSP_CONF_DIR}/pki:/opt/fsp/pki:ro
+    networks: [fsp]
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8084 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+networks:
+  fsp:
+    name: ${FSP_NETWORK:?}
+    external: true   # created once (stage-bootstrap.sh / the existing prod fsp-network)

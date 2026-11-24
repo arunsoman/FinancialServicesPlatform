@@ -1,0 +1,6 @@
+# The SPA build as an immutable, digest-pinned artifact. Never run: deploy.sh does
+# `docker create` + `docker cp /site` and publishes the files to the host nginx web root,
+# so the frontend is versioned, promoted and rolled back exactly like the services.
+FROM scratch
+COPY dist/ /site/
+CMD ["/none"]
