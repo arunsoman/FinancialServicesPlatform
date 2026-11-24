@@ -4,6 +4,8 @@ Portal menus (the navbar: menus, submenus and the widgets placed on each screen)
 Portal Builder, previewed locally, committed to the repo and deployed by CI/CD with everything
 else. No approval step, no manual publish, no signing by hand.
 
+The whole widget lifecycle, from idea to deploy, is in [widget-workflow.md](widget-workflow.md).
+
 ## The developer's loop
 
 1. **Build** the widget (fsp-widget skill) and register it (workbench → Registry → Register).

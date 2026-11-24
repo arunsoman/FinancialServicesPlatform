@@ -46,6 +46,7 @@ make tb-reset            # wipe TigerBeetle ledger data
 
 - **Dev Login (System Seed):** `platform-admin` / `fsp-admin` (or `$FSP_BOOTSTRAP_PASSWORD`)
 - **Demo Login (`client-demo` profile only):** `psp-admin`, `psp-ops`, `merchant-admin`, `merchant-checker` / `demo1234`
+- **Building a widget or changing a menu?** Follow [widget-workflow.md](widget-workflow.md): idea → UI on test data → approval → backend → builder → preview → menus as code → deploy, plus fixes for menu and signature errors.
 - **Portal shows "UI metadata tampered"?** See [ui-metadata-tampered.md](ui-metadata-tampered.md) (`cd frontend && bun run portal:check`, then restart core — it re-signs at boot).
 
 ---
