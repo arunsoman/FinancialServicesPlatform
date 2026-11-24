@@ -622,10 +622,20 @@ public class IdpController {
             
             // Exchange for token (validates client_assertion, DPoP)
             return tokenService.exchangeAuthCode(request, dpopHeader, authCodeData);
+        } else if ("refresh_token".equals(grantType)) {
+            // FAPI 2.0: the BFF renews a DPoP-bound access token (private_key_jwt + DPoP, no rotation)
+            return tokenService.refresh(body.get("refresh_token"), body.get("client_assertion"), dpopHeader);
         } else {
             throw new IdpProblemException(new IdpDtos.IdpProblem(
-                "UNSUPPORTED_GRANT", "grant_type must be 'password' or 'authorization_code'", 400));
+                "UNSUPPORTED_GRANT", "grant_type must be 'authorization_code', 'refresh_token', 'client_credentials' or 'password'", 400));
         }
+    }
+
+    /** RFC 7009 token revocation (logout trio): the client revokes its refresh token. */
+    @PostMapping(value = "/revoke", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public org.springframework.http.ResponseEntity<Void> revoke(@RequestBody Map<String, String> body) {
+        tokenService.revoke(body.get("token"), body.get("client_assertion"), body.get("reason"));
+        return org.springframework.http.ResponseEntity.ok().build();
     }
 
     // ========== Existing endpoints ==========
@@ -676,7 +686,8 @@ public class IdpController {
             "jwks_uri", "/idp/jwks",
             "pushed_authorization_request_endpoint", "/idp/par",
             "authorization_endpoint", "/idp/authorize",
-            "grant_types_supported", "authorization_code, password, client_credentials");
+            "grant_types_supported", "authorization_code, refresh_token, password, client_credentials",
+            "revocation_endpoint", "/idp/revoke");
     }
 
     // ========== V36: account activation (hosted at the IdP; reached via the gateway) ==========

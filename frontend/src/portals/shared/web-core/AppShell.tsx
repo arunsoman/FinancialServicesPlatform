@@ -7,6 +7,7 @@
 import { NavLink, Outlet, Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { doLogout, useSession } from './session-core';
+import { IdleSignOut } from './IdleSignOut';
 import type { PortalConfig } from '../../portal-config';
 import { layoutNavEntries, useMenuAccess, useSignedLayout } from '../../signed/signed-layout';
 import { getWidget } from '../widgets/registry';
@@ -67,7 +68,7 @@ export function AppShell({
                 </div>
               </div>
             )}
-            <button className="fsp-btn fsp-btn-ghost px-3 py-1 text-xs" onClick={() => doLogout()}>
+            <button className="fsp-btn fsp-btn-ghost px-3 py-1 text-xs" onClick={() => doLogout({ basePath: portal.basePath, storageKey: portal.storageKey })}>
               Sign out
             </button>
           </div>
@@ -150,6 +151,7 @@ export function AppShell({
 
         <main className="min-h-0 overflow-y-auto px-4 py-5 md:px-6" tabIndex={0} aria-label="Main content">
           <Outlet />
+          <IdleSignOut portal={portal} />
         </main>
       </div>
     </div>

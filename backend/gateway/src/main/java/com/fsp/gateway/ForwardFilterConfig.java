@@ -134,7 +134,7 @@ public class ForwardFilterConfig {
                 return;
             }
             boolean coreSide = path.startsWith("/v1/");
-            boolean idpSide = path.equals("/idp/jwks") || path.equals("/idp/token")
+            boolean idpSide = path.equals("/idp/jwks") || path.equals("/idp/token") || path.equals("/idp/revoke")
                 || path.equals("/idp/introspect") || path.equals("/idp/par")
                 || path.equals("/idp/authorize") || path.equals("/idp/authorize/callback")
                 || path.equals("/idp/login") || path.equals("/idp/error")

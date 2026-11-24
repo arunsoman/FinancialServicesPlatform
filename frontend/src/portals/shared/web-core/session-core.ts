@@ -63,10 +63,24 @@ export interface SessionState {
 
 export const NO_SESSION: SessionState = { status: 'loading', user: null, permissions: [], tenant: null, actAs: null };
 
+/** How long this session may sit idle, and when it ends regardless (from /bff/session). */
+export interface SessionLimits {
+  idleTimeoutSeconds: number;
+  /** ISO-8601; the BFF ends the session here whatever the activity */
+  sessionEndsAt: string | null;
+}
+
+let limits: SessionLimits | null = null;
+/** The limits the last /bff/session answer carried (null while signed out). */
+export function sessionLimits(): SessionLimits | null {
+  return limits;
+}
+
 /** GET /bff/session (BffSessionController). */
 export async function fetchWho(): Promise<SessionUser | null> {
   try {
-    const r = await apiGet<{ authenticated: boolean; user: SessionUser | null }>('/bff/session');
+    const r = await apiGet<{ authenticated: boolean; user: SessionUser | null; idleTimeoutSeconds?: number | null; sessionEndsAt?: string | null }>('/bff/session');
+    limits = r.authenticated && r.idleTimeoutSeconds ? { idleTimeoutSeconds: r.idleTimeoutSeconds, sessionEndsAt: r.sessionEndsAt ?? null } : null;
     return r.authenticated ? r.user : null;
   } catch {
     return null;
@@ -128,11 +142,39 @@ export async function doLogin(username: string, password: string): Promise<Sessi
 }
 
 /** Top-level form post so the browser follows the session teardown. */
-export async function doLogout(): Promise<void> {
+export interface LogoutOptions {
+  /** the portal's base path ('/admin'); its sign-in page is `${basePath}/login` */
+  basePath?: string;
+  /** the portal's per-portal localStorage key — cleared (FAPI 2.0 logout trio) */
+  storageKey?: string;
+  /** why: 'idle' | 'expired' | undefined (the person pressed Sign out) */
+  reason?: 'idle' | 'expired';
+}
+
+/**
+ * Logout trio (FAPI 2.0): the BFF drops the session and revokes its refresh token at the IdP,
+ * this portal's local state is cleared, and the browser lands on the portal's sign-in page.
+ * The BFF call is skipped when the session is already gone (reason 'expired').
+ */
+export async function doLogout(opts: LogoutOptions = {}): Promise<void> {
   try {
-    await apiPost('/bff/auth/logout');
+    if (opts.reason !== 'expired') await apiPost('/bff/auth/logout');
+  } catch {
+    // the session may already be gone — still leave the page signed out
   } finally {
-    window.location.href = '/login';
+    try {
+      if (opts.storageKey) {
+        for (const k of Object.keys(window.localStorage)) {
+          if (k === opts.storageKey || k.startsWith(`${opts.storageKey}.`)) window.localStorage.removeItem(k);
+        }
+      }
+    } catch {
+      // storage unavailable (private mode) — nothing to clear
+    }
+    limits = null;
+    const base = (opts.basePath ?? '').replace(/\/$/, '');
+    const q = opts.reason === 'idle' ? '?signed_out=idle' : opts.reason === 'expired' ? '?error=session_expired' : '';
+    window.location.href = `${base}/login${q}`;
   }
 }
 

@@ -37,8 +37,10 @@ public class BffSessionController {
 
     private final IdpClient idp;
     private final BffProperties props;
+    private final SessionTokens tokens;
 
-    public BffSessionController(IdpClient idp, BffProperties props) {
+    public BffSessionController(IdpClient idp, BffProperties props, SessionTokens tokens) {
+        this.tokens = tokens;
         this.idp = idp;
         this.props = props;
     }
@@ -121,10 +123,9 @@ public class BffSessionController {
             // Store session data (rotate session ID for fixation protection)
             session.invalidate();
             HttpSession newSession = request.getSession(true);
-            newSession.setAttribute(SESSION_TOKEN, tokenResp.accessToken());
+            tokens.start(newSession, tokenResp); // access + refresh token, idle + absolute limits
             newSession.setAttribute(SESSION_DPOP_KEY, parState.dpopPrivateKeyJwk());
             newSession.setAttribute(SESSION_USER, user);
-            newSession.setMaxInactiveInterval(8 * 60 * 60);
             request.changeSessionId();
             // Re-anchor the post-login destination (invalidate() above dropped it)
             newSession.setAttribute("FSP_LOGIN_RETURN_TO", returnTo);
@@ -166,7 +167,7 @@ public class BffSessionController {
     public ResponseEntity<Void> logout(HttpServletRequest request) {
         HttpSession session = request.getSession(false);
         if (session != null) {
-            session.invalidate(); // token dies with the session (server-side only)
+            tokens.end(session, "logout"); // logout trio: revoke the refresh token at the IdP, drop the session
         }
         log.info("bff_logout");
         return ResponseEntity.noContent().build();
@@ -175,7 +176,11 @@ public class BffSessionController {
     @GetMapping("/bff/session")
     public SessionResponse session(HttpServletRequest request) {
         SessionUser user = current(request);
-        return user == null ? new SessionResponse(false, null) : new SessionResponse(true, user);
+        HttpSession session = request.getSession(false);
+        if (user == null || session == null) return new SessionResponse(false, null, null, null);
+        // the browser signs out after this much real inactivity, and before the absolute end
+        return new SessionResponse(true, user, props.getSession().getIdleTimeoutMinutes() * 60,
+            tokens.absoluteEndInstant(session).toString());
     }
 
     /** Forces the CSRF cookie materialization for SPA double-submit. */

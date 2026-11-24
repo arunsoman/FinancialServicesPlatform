@@ -5,6 +5,9 @@
  */
 import { holdWhile } from './submit-guard';
 
+/** Fired on window when the BFF says the session is gone (NO_SESSION / SESSION_EXPIRED). */
+export const SESSION_ENDED_EVENT = 'fsp:session-ended';
+
 export interface ApiProblem {
   status: number;
   code?: string;
@@ -112,7 +115,16 @@ async function send<T>(path: string, method: HttpMethod, opts: ApiOpts): Promise
   }).catch(() => {
     throw new ApiError({ status: 0, title: 'Network error', detail: 'BFF unreachable' });
   });
-  if (r.status === 401) throw new ApiError({ status: 401, code: 'AUTH_REQUIRED', title: 'Not authenticated', detail: 'session required' });
+  if (r.status === 401) {
+    // The BFF's own "no/ended session" answers end the session for the WHOLE page — the shell
+    // sends the person to sign-in instead of every widget showing an error. Other 401s (an
+    // act-as row that expired, a plugin hiccup) are the caller's to handle.
+    const pd = (await r.json().catch(() => null)) as { code?: string } | null;
+    if (pd?.code === 'NO_SESSION' || pd?.code === 'SESSION_EXPIRED') {
+      window.dispatchEvent(new CustomEvent(SESSION_ENDED_EVENT, { detail: pd.code }));
+    }
+    throw new ApiError({ status: 401, code: 'AUTH_REQUIRED', title: 'Not authenticated', detail: 'session required' });
+  }
   if (r.status === 403) {
     // ui-std §5.2: a denial names WHAT was denied — keep the server's detail + code when present
     const pd = (await r.json().catch(() => null)) as { code?: string; detail?: string } | null;

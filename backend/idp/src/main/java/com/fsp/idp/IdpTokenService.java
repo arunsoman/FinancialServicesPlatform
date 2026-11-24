@@ -47,10 +47,12 @@ public class IdpTokenService {
     private final LoginThrottle throttle;
     private final long ttlSeconds;
     private final IdpProperties props;
+    private final RefreshTokens refreshTokens;
 
     public IdpTokenService(PPersonRepository persons, PTenantRepository tenants,
                            IdpConfigRepository configs, IdpAuthService auth, JdbcTemplate jdbc,
-                           IdpProperties props, LoginThrottle throttle) {
+                           IdpProperties props, LoginThrottle throttle, RefreshTokens refreshTokens) {
+        this.refreshTokens = refreshTokens;
         this.persons = persons;
         this.tenants = tenants;
         this.configs = configs;
@@ -275,9 +277,78 @@ public class IdpTokenService {
         IdpDtos.TokenClaims claims = new IdpDtos.TokenClaims(
             person.id.toString(), person.username, person.fullName, tenant.id.toString(),
             tenant.legalName, tenant.type, roles);
-        log.info("idp_token_exchanged username={} tenant={} clientId={} jkt={} expiresIn={}",
+        // 6. Refresh token (FAPI 2.0): bound to this client and this DPoP key, never rotated
+        String refreshToken = refreshTokens.issue(person.id, tenant.id, clientId, jkt, props.getRefreshTokenTtlSeconds());
+        log.info("idp_token_exchanged username={} tenant={} clientId={} jkt={} expiresIn={} refreshTtl={}",
+            person.username, tenant.id, clientId, jkt, ttlSeconds, props.getRefreshTokenTtlSeconds());
+        return new IdpDtos.TokenResponse(token, "DPoP", ttlSeconds, claims, refreshToken);
+    }
+
+    /**
+     * refresh_token grant (FAPI 2.0 / RFC 6749 §6 / RFC 9449 §5). Requires the SAME client
+     * (private_key_jwt) and a fresh DPoP proof by the SAME key the refresh token is bound to;
+     * the person and their organization must still be allowed to sign in, and roles are read
+     * again. Issues a new DPoP-bound access token; the refresh token is NOT rotated (§5.3.2.1)
+     * and is not returned again.
+     */
+    public IdpDtos.TokenResponse refresh(String refreshToken, String clientAssertion, String dpopHeader) {
+        String clientId = validateClientAssertion(clientAssertion);
+        if (clientId == null) {
+            throw new IdpProblemException(new IdpDtos.IdpProblem("INVALID_CLIENT", "Invalid client_assertion", 401));
+        }
+        String jkt = validateDPoPProof(dpopHeader, props.getIssuer() + "/idp/token", "POST");
+        if (jkt == null) {
+            throw new IdpProblemException(new IdpDtos.IdpProblem("INVALID_DPOP_PROOF", "DPoP proof validation failed", 400));
+        }
+        RefreshTokens.Stored rt = refreshTokens.find(refreshToken).orElse(null);
+        String refusal = rt == null ? "unknown"
+            : rt.revokedAt() != null ? "revoked"
+            : !Instant.now().isBefore(rt.expiresAt()) ? "expired"
+            : !rt.clientId().equals(clientId) ? "client_mismatch"
+            : !rt.jkt().equals(jkt) ? "dpop_key_mismatch"
+            : null;
+        if (refusal != null) {
+            log.warn("idp_refresh_refused reason={} clientId={}", refusal, clientId);
+            throw new IdpProblemException(new IdpDtos.IdpProblem("INVALID_GRANT", "Refresh token is not valid", 400));
+        }
+        PPerson person = persons.findById(rt.personId()).orElse(null);
+        PTenant tenant = tenants.findById(rt.tenantId()).orElse(null);
+        String blocked = person == null ? "person_missing"
+            : !"ACTIVE".equals(person.status) ? "person_inactive"
+            : tenant == null ? "tenant_missing"
+            : ("SUSPENDED".equals(tenant.status) || "TERMINATED".equals(tenant.status)) ? "tenant_" + tenant.status.toLowerCase()
+            : null;
+        if (blocked != null) {
+            refreshTokens.revoke(refreshToken, clientId, blocked);
+            log.warn("idp_refresh_refused reason={} personId={}", blocked, rt.personId());
+            throw new IdpProblemException(new IdpDtos.IdpProblem("INVALID_GRANT", "Sign in again", 400));
+        }
+        List<String> roles = roleKeys(person.id);
+        Instant now = Instant.now();
+        String token = jwt.signWithCnf(new JwtService.Claims(
+            person.id.toString(), tenant.id.toString(), person.username, clientId,
+            roles, now, now.plusSeconds(ttlSeconds), JwtService.DEFAULT_AUDIENCE), clientId, JwtService.DEFAULT_AUDIENCE, jkt);
+        refreshTokens.touch(rt.id());
+        IdpDtos.TokenClaims claims = new IdpDtos.TokenClaims(
+            person.id.toString(), person.username, person.fullName, tenant.id.toString(),
+            tenant.legalName, tenant.type, roles);
+        log.info("idp_token_refreshed username={} tenant={} clientId={} jkt={} expiresIn={}",
             person.username, tenant.id, clientId, jkt, ttlSeconds);
-        return new IdpDtos.TokenResponse(token, "DPoP", ttlSeconds, claims);
+        return new IdpDtos.TokenResponse(token, "DPoP", ttlSeconds, claims, null);
+    }
+
+    /** RFC 7009 revocation by the client that holds the token; always answers OK (no oracle). */
+    public void revoke(String refreshToken, String clientAssertion, String reason) {
+        String clientId = validateClientAssertion(clientAssertion);
+        if (clientId == null) {
+            throw new IdpProblemException(new IdpDtos.IdpProblem("INVALID_CLIENT", "Invalid client_assertion", 401));
+        }
+        if (refreshToken == null || refreshToken.isBlank()) return;
+        String why = reason == null ? "" : reason.replaceAll("[^a-z_]", "");
+        if (why.isEmpty()) why = "logout";
+        if (why.length() > 32) why = why.substring(0, 32);
+        boolean revoked = refreshTokens.revoke(refreshToken, clientId, why);
+        log.info("idp_refresh_revoked clientId={} revoked={} reason={}", clientId, revoked, why);
     }
 
     /**

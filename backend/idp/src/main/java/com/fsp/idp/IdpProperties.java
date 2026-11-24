@@ -6,6 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public final class IdpProperties {
     private String issuer = "https://idp.fsp.local";
     private long accessTokenTtlSeconds = 900;
+    /** Refresh token lifetime — at most the BFF's absolute session (8 h); revoked earlier at logout. */
+    private long refreshTokenTtlSeconds = 28800;
     private String signingKeyPath = "../infrastructure/pki/dev/idp-signing.pem";
     // Red-team P0 fix: NO in-code default — deny-all until the operator injects the secret
     // via env (FSP_INTERNAL_CREDENTIAL_IDP); only the gateway's /idp/policy hop uses it.
@@ -21,6 +23,8 @@ public final class IdpProperties {
     public String getIssuer() { return issuer; }
     public void setIssuer(String issuer) { this.issuer = issuer; }
     public long getAccessTokenTtlSeconds() { return accessTokenTtlSeconds; }
+    public long getRefreshTokenTtlSeconds() { return refreshTokenTtlSeconds; }
+    public void setRefreshTokenTtlSeconds(long v) { this.refreshTokenTtlSeconds = v; }
     public void setAccessTokenTtlSeconds(long v) { this.accessTokenTtlSeconds = v; }
     public String getSigningKeyPath() { return signingKeyPath; }
     public void setSigningKeyPath(String p) { this.signingKeyPath = p; }

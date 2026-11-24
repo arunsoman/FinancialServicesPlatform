@@ -47,7 +47,10 @@ public class ApiProxyController {
     private final BffProperties props;
     private final IdpClient idp;
 
-    public ApiProxyController(RestClient rest, BffProperties props, IdpClient idp) {
+    private final SessionTokens tokens;
+
+    public ApiProxyController(RestClient rest, BffProperties props, IdpClient idp, SessionTokens tokens) {
+        this.tokens = tokens;
         this.rest = rest;
         this.props = props;
         this.idp = idp;
@@ -62,13 +65,18 @@ public class ApiProxyController {
         }
 
         SessionUser user = BffSessionController.current(request);
-        String token = BffSessionController.token(request);
-        String dpopKey = BffSessionController.dpopKey(request);
-        if (user == null || !StringUtils.hasText(token)) {
+        if (user == null) {
             log.warn("proxy_no_session path={} remote={}", request.getRequestURI(), request.getRemoteAddr());
             reject(response, 401, "NO_SESSION", "Authentication required (GET /bff/auth/login)");
             return;
         }
+        // renewed if about to expire; null = the session just ended (absolute limit / renewal refused)
+        String token = tokens.liveToken(request);
+        if (!StringUtils.hasText(token)) {
+            reject(response, 401, "SESSION_EXPIRED", "Your session has ended — sign in again");
+            return;
+        }
+        String dpopKey = BffSessionController.dpopKey(request);
         // plans/act-as-tenant-plan.md §3.3: every proxied call rides the BFF session's act-as
         // id (server-side state); a stale/foreign id is refused closed by core (ACT_AS_EXPIRED).
         HttpSession session = request.getSession(false);
@@ -120,10 +128,8 @@ public class ApiProxyController {
                 String code = problemCode(new String(upstream.getBody(), java.nio.charset.StandardCharsets.UTF_8));
                 if (TOKEN_REJECTION_CODES.contains(code)) {
                     log.warn("proxy_session_invalidated path={} code={}", request.getRequestURI(), code);
-                    try {
-                        jakarta.servlet.http.HttpSession s = request.getSession(false);
-                        if (s != null) s.invalidate();
-                    } catch (Exception ignored) {}
+                    jakarta.servlet.http.HttpSession s = request.getSession(false);
+                    if (s != null) tokens.end(s, "token_rejected");
                 } else {
                     log.warn("proxy_upstream_401 path={} code={} sessionKept=true", request.getRequestURI(), code);
                 }
@@ -135,10 +141,8 @@ public class ApiProxyController {
                 String code = problemCode(e.getResponseBodyAsString());
                 if (TOKEN_REJECTION_CODES.contains(code)) {
                     log.warn("proxy_session_invalidated path={} code={}", request.getRequestURI(), code);
-                    try {
-                        jakarta.servlet.http.HttpSession s = request.getSession(false);
-                        if (s != null) s.invalidate();
-                    } catch (Exception ignored) {}
+                    jakarta.servlet.http.HttpSession s = request.getSession(false);
+                    if (s != null) tokens.end(s, "token_rejected");
                 } else {
                     log.warn("proxy_upstream_401 path={} code={} sessionKept=true", request.getRequestURI(), code);
                 }

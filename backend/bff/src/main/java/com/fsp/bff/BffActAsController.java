@@ -45,7 +45,10 @@ public class BffActAsController {
     private final BffProperties props;
     private final IdpClient idp;
 
-    public BffActAsController(RestClient rest, BffProperties props, IdpClient idp) {
+    private final SessionTokens tokens;
+
+    public BffActAsController(RestClient rest, BffProperties props, IdpClient idp, SessionTokens tokens) {
+        this.tokens = tokens;
         this.rest = rest;
         this.props = props;
         this.idp = idp;
@@ -120,7 +123,7 @@ public class BffActAsController {
     /** Person-plane call to core: bearer + DPoP, NEVER the session's X-Act-As (ActAsFilter
      *  excludes /v1/act-as anyway — belt and braces). */
     private Upstream callCore(HttpServletRequest request, HttpMethod method, String path, String body) {
-        String token = BffSessionController.token(request);
+        String token = tokens.liveToken(request);
         String dpopKey = BffSessionController.dpopKey(request);
         String url = props.getGateway().getBaseUrl() + path;
         try {
