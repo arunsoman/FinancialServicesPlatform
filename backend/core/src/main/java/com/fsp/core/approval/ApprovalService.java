@@ -93,6 +93,15 @@ public class ApprovalService {
                 "A plugin machine actor cannot be a maker; four-eyes is person-anchored at person_id");
         }
 
+        // One pending request per (type, target) — ux_approvals_pending_target enforces it; say so
+        // plainly instead of letting the unique violation surface as a 500 "Internal error".
+        if (targetResourceId != null && repository.existsByOperationTypeAndTargetResourceIdAndStatus(
+                opType, targetResourceId, ApprovalRequest.Status.PENDING_CHECKER)) {
+            log.info("approval_open_duplicate type={} target={} maker={}", opType, targetResourceId, makerId);
+            throw ApiException.conflict("APPROVAL_ALREADY_PENDING",
+                "A request like this is already waiting for a checker — approve or reject that one first");
+        }
+
         String payloadHash = HashUtil.sha256Hex(opType + "|" + targetResourceId + "|" + payloadDescription);
         ApprovalRequest row = new ApprovalRequest();
         row.id = UUID.randomUUID();
@@ -430,6 +439,7 @@ public class ApprovalService {
             case ApprovalRequest.OpType.USER_DEACTIVATE -> ApprovalRequest.OpType.USER_DEACTIVATE;
             case ApprovalRequest.OpType.USER_ACTIVATE -> ApprovalRequest.OpType.USER_ACTIVATE;
             case ApprovalRequest.OpType.USER_REMOVE -> ApprovalRequest.OpType.USER_REMOVE;
+            case ApprovalRequest.OpType.USER_PASSWORD_RESET -> ApprovalRequest.OpType.USER_PASSWORD_RESET;
             case ApprovalRequest.OpType.UI_LAYOUT_PUBLISH -> ApprovalRequest.OpType.UI_LAYOUT_PUBLISH;
             case ApprovalRequest.OpType.PLUGIN_REGISTER -> ApprovalRequest.OpType.PLUGIN_REGISTER;
             case ApprovalRequest.OpType.PLUGIN_INSTALL -> ApprovalRequest.OpType.PLUGIN_INSTALL;

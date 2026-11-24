@@ -221,6 +221,41 @@ class ApprovalServiceGovernanceTest {
         assertThat(v.canDecide()).isTrue();
     }
 
+    /**
+     * Every core op type a domain flow opens must survive canonicalisation — otherwise it is
+     * stored as GENERIC, its handler never runs, and the approval is a silent no-op (an admin
+     * password reset was approved and no reset link was ever sent).
+     */
+    @Test
+    void everyCoreOperationTypeIsStoredAsItself() {
+        for (String op : List.of(
+                ApprovalRequest.OpType.USER_CREATE, ApprovalRequest.OpType.USER_UPDATE,
+                ApprovalRequest.OpType.USER_DEACTIVATE, ApprovalRequest.OpType.USER_ACTIVATE,
+                ApprovalRequest.OpType.USER_REMOVE, ApprovalRequest.OpType.USER_PASSWORD_RESET,
+                ApprovalRequest.OpType.ROLE_CREATE, ApprovalRequest.OpType.ROLE_UPDATE,
+                ApprovalRequest.OpType.ROLE_DELETE, ApprovalRequest.OpType.JE_POSTING,
+                ApprovalRequest.OpType.BANK_ACCOUNT_CREATE, ApprovalRequest.OpType.KYC_TENANT_ACTIVATION,
+                ApprovalRequest.OpType.PLUGIN_REGISTER, ApprovalRequest.OpType.PLUGIN_INSTALL,
+                ApprovalRequest.OpType.UI_LAYOUT_PUBLISH)) {
+            ApprovalRequest opened = svc.open(TENANT, op, UUID.randomUUID(),
+                new Actor(MAKER_ID, "maker", TENANT), "test", null);
+            assertThat(opened.operationType).as(op).isEqualTo(op);
+        }
+    }
+
+    /** A second identical request while one is pending is a clear 409, never a 500 from the unique index. */
+    @Test
+    void secondPendingRequestForTheSameTargetIsAClearConflict() {
+        UUID target = UUID.randomUUID();
+        when(repo.existsByOperationTypeAndTargetResourceIdAndStatus(
+            ApprovalRequest.OpType.USER_PASSWORD_RESET, target, ApprovalRequest.Status.PENDING_CHECKER)).thenReturn(true);
+
+        assertThatThrownBy(() -> svc.open(TENANT, ApprovalRequest.OpType.USER_PASSWORD_RESET, target,
+                new Actor(MAKER_ID, "maker", TENANT), "again", null))
+            .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("APPROVAL_ALREADY_PENDING"));
+        verify(repo, never()).save(any());
+    }
+
     @Test
     void queueOpensForAnyCheckerPermission() {
         assertThat(ApprovalService.CHECKER_PERMISSIONS)

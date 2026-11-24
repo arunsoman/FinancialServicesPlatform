@@ -127,6 +127,20 @@ public class IdpController {
               });
             });
           });
+          // ---- Show-password toggles: CSP-safe (no inline handlers), markup-driven ----
+          document.querySelectorAll('button[data-pw-toggle]').forEach(function (btn) {
+            var input = document.getElementById(btn.getAttribute('data-pw-toggle'));
+            if (!input || !(input instanceof HTMLInputElement)) return;
+            btn.addEventListener('click', function () {
+              var show = input.getAttribute('type') === 'password';
+              input.setAttribute('type', show ? 'text' : 'password');
+              btn.textContent = show ? 'Hide' : 'Show';
+              btn.setAttribute('aria-pressed', String(show));
+              btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+              input.focus({ preventScroll: true });
+              try { input.setSelectionRange(input.value.length, input.value.length); } catch (ignored) { }
+            });
+          });
         })();
         """;
 
@@ -208,6 +222,12 @@ public class IdpController {
               button { margin-top: 1.25rem; width: 100%%; padding: .6rem; border: 0; border-radius: 8px;
                        background: #f0a10e; color: #101418; font-weight: 700; cursor: pointer; }
               .hint { margin-top: 1rem; font-size: .7rem; color: #7a8a99; line-height: 1.5; }
+              .pw-row { display: flex; gap: .4rem; align-items: stretch; }
+              .pw-row input { width: auto; flex: 1 1 auto; min-width: 0; }
+              .pw-toggle { margin-top: 0; width: auto; flex: 0 0 auto; padding: .55rem .7rem;
+                           border: 1px solid #3a4450; border-radius: 8px; background: transparent;
+                           color: #9fb0c0; font: inherit; font-size: .7rem; cursor: pointer; }
+              .pw-toggle:hover { border-color: #f0a10e; color: #f0a10e; }
             </style></head><body><div class="panel">
             <p class="eyebrow">FSP Identity Provider</p>
             <h1>Sign in to continue</h1>
@@ -216,7 +236,11 @@ public class IdpController {
               <label for="u">Username</label>
               <input id="u" name="username" autocomplete="username" required autofocus>
               <label for="p">Password</label>
-              <input id="p" name="password" type="password" autocomplete="current-password" required>
+              <div class="pw-row">
+                <input id="p" name="password" type="password" autocomplete="current-password" required>
+                <button type="button" class="pw-toggle" data-pw-toggle="p"
+                        aria-pressed="false" aria-label="Show password">Show</button>
+              </div>
               <button type="submit">Sign in</button>
             </form>
             <p class="hint">Client: %s &middot; Your credentials never leave the Identity Provider.</p>
@@ -352,15 +376,29 @@ public class IdpController {
               .hint { margin-top: 1rem; font-size: .7rem; color: #7a8a99; line-height: 1.5; }
               .error { margin-top: 1rem; font-size: .75rem; color: #e5484d; }
               .error:empty { display: none; }
+              .pw-row { display: flex; gap: .4rem; align-items: stretch; }
+              .pw-row input { width: auto; flex: 1 1 auto; min-width: 0; }
+              .pw-toggle { margin-top: 0; width: auto; flex: 0 0 auto; padding: .55rem .7rem;
+                           border: 1px solid #3a4450; border-radius: 8px; background: transparent;
+                           color: #9fb0c0; font: inherit; font-size: .7rem; cursor: pointer; }
+              .pw-toggle:hover { border-color: #f0a10e; color: #f0a10e; }
             </style></head><body><div class="panel">
             <p class="eyebrow">FSP Identity Provider</p>
             <h1>Set your own password</h1>
             <form method="post" action="/idp/password/complete">
               <input type="hidden" name="ticket" value="%s">
               <label for="np">New password</label>
-              <input id="np" name="new_password" type="password" autocomplete="new-password" required autofocus>
+              <div class="pw-row">
+                <input id="np" name="new_password" type="password" autocomplete="new-password" required autofocus>
+                <button type="button" class="pw-toggle" data-pw-toggle="np"
+                        aria-pressed="false" aria-label="Show password">Show</button>
+              </div>
               <label for="npc">Confirm new password</label>
-              <input id="npc" name="confirm_password" type="password" autocomplete="new-password" required>
+              <div class="pw-row">
+                <input id="npc" name="confirm_password" type="password" autocomplete="new-password" required>
+                <button type="button" class="pw-toggle" data-pw-toggle="npc"
+                        aria-pressed="false" aria-label="Show password">Show</button>
+              </div>
               <button type="submit">Set new password</button>
               <p class="error" id="chg-err">%s</p>
             </form>

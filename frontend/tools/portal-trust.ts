@@ -84,7 +84,8 @@ function publish(force: boolean, args: string[]): void {
   const portal = args.find((a) => a.startsWith('--portal='))?.slice('--portal='.length) ?? process.env.PORTAL ?? 'admin';
   const env = { ...process.env, PORTAL: portal, ...(force ? { FSP_PUBLISH_FORCE: '1' } : {}) };
   // process.execPath is the bun binary on every OS — no reliance on bunx/.cmd shims or a POSIX shell.
-  const r = spawnSync(process.execPath, ['x', 'playwright', 'test', '-c', 'playwright.setup.config.ts'],
+  // only the portal-publish flow — tests/setup also holds plugin-upgrade / widget-register one-shots
+  const r = spawnSync(process.execPath, ['x', 'playwright', 'test', '-c', 'playwright.setup.config.ts', 'portal-publish'],
     { cwd: FRONTEND, env, stdio: 'inherit' });
   process.exit(r.status ?? 1);
 }
