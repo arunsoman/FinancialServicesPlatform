@@ -76,14 +76,13 @@ OOM-killed first. Container logs are capped at 3 × 10 MB. Expect a slow cold st
    The plugin client keys are the ones in the committed manifests (`client.jwks`), so after rotating
    them Grafana shows `key_mismatch` for each plugin: register the new per-environment manifest
    (maker + checker) to finish the rotation.
-2. **Deploy user + SSH key** (on the server, as `ubuntu`):
-   `ssh-keygen -t ed25519 -N '' -f fsp-deploy -C fsp-github-deploy` → append `fsp-deploy.pub`
-   to `~/.ssh/authorized_keys`. Known hosts: `ssh-keyscan -t ed25519 web.afriqpay.com`.
-3. **GitHub → Settings → Environments**
-   - `staging`: secrets `DEPLOY_HOST`, `DEPLOY_USER` (`ubuntu`), `DEPLOY_SSH_KEY` (private key),
-     `DEPLOY_KNOWN_HOSTS`; deployment branches: `staging` only.
-   - `production`: same four secrets; **Required reviewers** (not the person merging); prevent
-     self-review; deployment branches: `main` and tags `prod-*`.
+2. **GitHub environments**: `staging` (deployment branch `staging` only) and `production`
+   (**Required reviewers**, not the person merging; prevent self-review; branches `main`, tags `prod-*`).
+3. **Deploy key + secrets** — run on your workstation (a person provisions credentials, never CI):
+   `bash deploy/pipeline/scripts/setup-deploy-key.sh staging` (later: `production`).
+   It creates a dedicated key, authorizes it on the server with `restrict`, stores
+   `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` in the environment, and
+   deletes the local private key. Re-run to rotate.
 4. **Branch protection** for `staging` and `main`: require PR, 1 approval, Code Owners review,
    status checks `backend`, `frontend`, `docs`, `security`, `deploy-config`, `plugins`,
    `analyze (java-kotlin)`, `analyze (javascript-typescript)` (path-skipped jobs count as passed);
