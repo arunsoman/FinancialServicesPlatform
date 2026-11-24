@@ -125,6 +125,28 @@ class UiBundleServiceTest {
     }
 
     @Test
+    void signedPayloadMatchesTheReloadedRowDespiteDatabaseTimestampPrecision() {
+        // the publisher signs the in-memory row (nanosecond Instant); Postgres keeps microseconds,
+        // so the checkpoint / boot sync re-assemble from a row that lost the last digits
+        UiLayout inMemory = published("admin");
+        inMemory.updatedAt = java.time.Instant.parse("2026-11-23T02:01:51.947428223Z");
+        UiLayout reloaded = published("admin");
+        reloaded.id = inMemory.id;
+        reloaded.layoutJson = inMemory.layoutJson;
+        reloaded.updatedAt = java.time.Instant.parse("2026-11-23T02:01:51.947428Z");
+        UiLayoutRepository layouts = mock(UiLayoutRepository.class);
+        UiWidgetRepository widgets = mock(UiWidgetRepository.class);
+        when(widgets.findAllByOrderByIdAsc()).thenReturn(List.of());
+        when(layouts.findFirstByPortalAndStatus("admin", UiLayout.Status.PUBLISHED))
+                .thenReturn(Optional.of(inMemory), Optional.of(reloaded));
+        UiBundleService svc = new UiBundleService(layouts, widgets, mock(UiBundleRepository.class), signer);
+
+        UiBundle signed = svc.generate("admin");
+
+        assertThat(signer.digest(svc.canonicalPayloadFor("admin"))).isEqualTo(signed.digest);
+    }
+
+    @Test
     void noPublishedLayoutSkipsGeneration() {
         UiLayoutRepository layouts = mock(UiLayoutRepository.class);
         UiWidgetRepository widgets = mock(UiWidgetRepository.class);

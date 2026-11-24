@@ -1,8 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * One-shot dev setup flows that drive the REAL UI (not tests of it): `make portal-publish`
- * publishes a signed portal bundle through the four-eyes builder flow (GAP-7).
+ * One-shot dev setup flows that drive the REAL UI (not tests of it), e.g. `make plugin-upgrade`.
+ * (Portal bundles need none: core signs the repo's menus at boot — docs/portal-menus.md.)
  */
 export default defineConfig({
   testDir: './tests/setup',

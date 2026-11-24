@@ -14,6 +14,7 @@
     "lint": "bunx --bun eslint . --report-unused-disable-directives --max-warnings 0",
     "typecheck": "bunx --bun tsc --noEmit",
     "widgets:check": "bun run tools/widgets.ts check",
+    "menus:check": "bun run tools/menus-check.ts",
     "widgets:list": "bun run tools/widgets.ts list",
     "widgets:gen": "bun run tools/widgets.ts gen",
     "widgets:register": "bun run tools/widgets.ts register",
@@ -29,9 +30,7 @@
     "widgets:accept": "bun run tools/widget-agent.ts accept",
     "widgets:done": "bun run tools/widget-agent.ts done",
     "portal:check": "bun run tools/portal-trust.ts check",
-    "portal:pin": "bun run tools/portal-trust.ts pin",
-    "portal:publish": "bun run tools/portal-trust.ts publish",
-    "portal:republish": "bun run tools/portal-trust.ts republish"
+    "portal:pin": "bun run tools/portal-trust.ts pin"
   },
   "dependencies": {
     "@fontsource/figtree": "^5.3.0",

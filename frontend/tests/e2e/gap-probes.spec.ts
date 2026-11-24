@@ -11,7 +11,7 @@
  *
  * Run: `bun run test:e2e tests/e2e/gap-probes.spec.ts` with the full dev stack up
  * (`make infra-up tb-start backend-idp backend-core backend-gateway backend-bff
- * backend-plugin-kyc frontend-dev`). GAP-7 also needs `make portal-publish` once per DB.
+ * backend-plugin-kyc frontend-dev`). GAP-7: core signs the seeded menus at boot (docs/portal-menus.md).
  */
 import { expect, test, type Browser } from '@playwright/test';
 import {

@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -118,7 +119,9 @@ public class UiBundleService {
             payload.put("portal", portal);
             payload.put("schemaVersion", 1);
             payload.put("layoutVersion", published.id.toString());
-            payload.put("publishedAt", published.updatedAt.toString());
+            // microseconds: what Postgres keeps. The publisher signs its in-memory row (nanoseconds);
+            // the checkpoint and boot sync re-assemble from the stored row — both must agree.
+            payload.put("publishedAt", published.updatedAt.truncatedTo(ChronoUnit.MICROS).toString());
             payload.put("menus", menus);
             List<Map<String, Object>> widgetList = new ArrayList<>();
             for (UiWidget w : widgets.findAllByOrderByIdAsc()) {

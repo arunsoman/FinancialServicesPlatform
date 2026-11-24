@@ -14,7 +14,7 @@
  * steps in rather than deciding outside the tenant).
  *
  * Prereqs: the dev stack (`make infra-up tb-start backend-idp backend-core backend-gateway
- * backend-bff backend-plugin-kyc frontend-dev`) and `make portal-publish` once per DB.
+ * backend-bff backend-plugin-kyc frontend-dev`); core signs the seeded portal menus at boot.
  */
 import { expect, test } from '@playwright/test';
 import { randomUUID } from 'node:crypto';

@@ -5,15 +5,15 @@
  *
  *   bun run portal:check                      — compare SPA pin vs this machine's signing key
  *   bun run portal:pin                        — rewrite trust-store.json from this machine's public key
- *   bun run portal:publish   [--portal=admin] — publish a signed bundle if the portal has none
- *   bun run portal:republish [--portal=admin] — re-sign even if a bundle exists (FSP_PUBLISH_FORCE=1)
+ *
+ * Bundles need no command: core signs every portal's menus at boot (UiBundleBootSync), and
+ * re-signs any bundle its current key did not sign — so after re-keying, restart core.
  *
  * PUBLIC key material only is read/printed. The private key is read solely to confirm the
  * public PEM belongs to it; it is never printed or written anywhere.
  */
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,7 +36,7 @@ function localPublicJwk(): Jwk {
   const fromPriv = createPublicKey(createPrivateKey(readFileSync(PRIV))).export({ format: 'jwk' }) as Jwk;
   if (pub.x !== fromPriv.x || pub.y !== fromPriv.y) {
     fail('ui-builder-signing-pub.pem does not belong to ui-builder-signing.pem — delete BOTH, '
-      + 're-run the pki step, restart core, then `bun run portal:pin` and `bun run portal:republish`');
+      + 're-run the pki step, `bun run portal:pin`, then restart core (it re-signs at boot)');
   }
   return pub;
 }
@@ -57,11 +57,11 @@ function check(): void {
   if (!pinned) fail(`trust-store.json has no "${KID}" key — run \`bun run portal:pin\``);
   if (pinned.x !== local.x || pinned.y !== local.y) {
     fail('trust-store.json pins a DIFFERENT key than this machine signs with '
-      + '(typically a teammate\'s committed pin). Run `bun run portal:pin`, then `bun run portal:republish`.');
+      + '(typically a teammate\'s committed pin). Run `bun run portal:pin` (the SPA reloads with it).');
   }
   console.log('✓ trust-store.json matches this machine\'s signing key.');
-  console.log('  If the portal still shows "UI metadata tampered", the stored bundle was signed by an older');
-  console.log('  key: make sure core was restarted after the last pki run, then `bun run portal:republish`.');
+  console.log('  If the portal still shows "UI metadata tampered", restart core: at boot it re-signs every');
+  console.log('  portal bundle its current key did not sign (UiBundleBootSync).');
 }
 
 function pin(): void {
@@ -80,21 +80,14 @@ function pin(): void {
   console.log('✓ trust-store.json re-pinned to this machine\'s public key (Vite reloads it; rebuild for dist).');
 }
 
-function publish(force: boolean, args: string[]): void {
-  const portal = args.find((a) => a.startsWith('--portal='))?.slice('--portal='.length) ?? process.env.PORTAL ?? 'admin';
-  const env = { ...process.env, PORTAL: portal, ...(force ? { FSP_PUBLISH_FORCE: '1' } : {}) };
-  // process.execPath is the bun binary on every OS — no reliance on bunx/.cmd shims or a POSIX shell.
-  // only the portal-publish flow — tests/setup also holds plugin-upgrade / widget-register one-shots
-  const r = spawnSync(process.execPath, ['x', 'playwright', 'test', '-c', 'playwright.setup.config.ts', 'portal-publish'],
-    { cwd: FRONTEND, env, stdio: 'inherit' });
-  process.exit(r.status ?? 1);
-}
 
-const [cmd = 'check', ...rest] = process.argv.slice(2);
+const [cmd = 'check'] = process.argv.slice(2);
 switch (cmd) {
   case 'check': check(); break;
   case 'pin': pin(); break;
-  case 'publish': publish(false, rest); break;
-  case 'republish': publish(true, rest); break;
-  default: fail(`unknown command "${cmd}" — use check | pin | publish | republish`);
+  case 'publish':
+  case 'republish':
+    fail('gone: core signs portal menus at boot (docs/portal-menus.md). Restart core to re-sign.');
+    break;
+  default: fail(`unknown command "${cmd}" — use check | pin`);
 }

@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Export the PUBLISHED portal menus (Portal Builder layouts) + the widget registry they use
-# from a running FSP database into a Flyway seed every other environment applies on boot:
+# Export the portal menus (Portal Builder layouts) + the widget registry they use from your
+# local FSP database into the Flyway seed every environment applies on deploy:
 #
 #   backend/core/src/main/resources/db/seed/system/R__seed_portal_menus.sql
 #
-# Re-run after publishing menu changes, review the diff, commit. The seed is a REPEATABLE
-# migration (re-applied when its checksum changes) and INSERT-IF-ABSENT only:
-#   - a portal that already has a PUBLISHED layout is never overwritten — changing a live
-#     menu stays a four-eyes UI_LAYOUT_PUBLISH in the builder (AGENTS §2.1);
-#   - widgets already registered keep their row.
-# Signed bundles (ui_bundles) are NOT exported: each environment signs with its own key.
-# After the seed lands, mint them with `cd frontend && bun run portal:publish`.
+# Menus ship like code (docs/portal-menus.md): build them in the builder, preview them, run
+# this (or the menu-publisher skill), commit. The seed is a REPEATABLE migration (re-applied
+# when its checksum changes) and the REPO WINS:
+#   - each portal's PUBLISHED layout is set to the exported one (unchanged rows are untouched);
+#   - widgets are inserted or updated to the exported definition (bundle_sha256 stays per env).
+# Per portal the NEWEST layout is exported — the saved builder draft if it is newer than the
+# published one — so nothing needs publishing locally first.
+# Core signs the result at boot (UiBundleBootSync) with each environment's own key.
 #
 # Usage: scripts/export-portal-menus.sh [output-file]
 #   FSP_PSQL  psql command to use (default: docker exec -i fsp-postgres psql -U fsp -d fsp)
@@ -25,9 +26,27 @@ tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
 $PSQL -X -q -At -v ON_ERROR_STOP=1 -v seed_person="$SEED_PERSON" >"$tmp" <<'SQL'
+CREATE TEMP VIEW menus AS
+  SELECT DISTINCT ON (portal) portal, layout_json::jsonb AS layout, schema_version
+  FROM ui_layouts
+  ORDER BY portal, updated_at DESC;
+
+-- every placed widget must be registered (ACTIVE), or the signed bundle would not approve it
+SELECT format('MISSING-WIDGET %s (portal %s)', w, portal)
+FROM (SELECT DISTINCT portal,
+             jsonb_path_query(layout, '$.menus[*].screens[*].placedWidgets[*].widgetId') #>> '{}' AS w
+      FROM menus) placed
+WHERE w NOT IN (SELECT id FROM ui_widgets WHERE status = 'ACTIVE')
+ORDER BY 1;
+
 SELECT format(
   E'INSERT INTO ui_widgets (id, version, label, category, bundle, portals, requires, status, registered_by, bundle_sha256)\n'
-  || E'VALUES (%L, %L, %L, %L, %L, %L, %L, %L, %L, %L)\nON CONFLICT (id) DO NOTHING;\n',
+  || E'VALUES (%L, %L, %L, %L, %L, %L, %L, %L, %L, %L)\n'
+  || E'ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, label = EXCLUDED.label,\n'
+  || E'  category = EXCLUDED.category, bundle = EXCLUDED.bundle, portals = EXCLUDED.portals,\n'
+  || E'  requires = EXCLUDED.requires, status = EXCLUDED.status, updated_at = now()\n'
+  || E'WHERE (ui_widgets.version, ui_widgets.label, ui_widgets.category, ui_widgets.bundle, ui_widgets.portals, ui_widgets.requires, ui_widgets.status)\n'
+  || E'  IS DISTINCT FROM (EXCLUDED.version, EXCLUDED.label, EXCLUDED.category, EXCLUDED.bundle, EXCLUDED.portals, EXCLUDED.requires, EXCLUDED.status);\n',
   id, version, label, category, bundle, portals, requires, status, :'seed_person', bundle_sha256)
 FROM ui_widgets
 WHERE status = 'ACTIVE'
@@ -36,20 +55,28 @@ ORDER BY id;
 SELECT format(
   E'-- portal: %s\n'
   || E'INSERT INTO ui_layouts (id, portal, status, layout_json, schema_version, maker_id)\n'
-  || E'SELECT %L, %L, ''PUBLISHED'', %L, %s, %L\n'
-  || E'WHERE NOT EXISTS (SELECT 1 FROM ui_layouts WHERE portal = %L AND status = ''PUBLISHED'')\n'
-  || E'ON CONFLICT (id) DO NOTHING;\n',
+  || E'VALUES (%L, %L, ''PUBLISHED'', %L, %s, %L)\n'
+  || E'ON CONFLICT (portal) WHERE status = ''PUBLISHED'' DO UPDATE\n'
+  || E'  SET layout_json = EXCLUDED.layout_json, schema_version = EXCLUDED.schema_version,\n'
+  || E'      maker_id = EXCLUDED.maker_id, published_approval_id = NULL,\n'
+  || E'      version_num = ui_layouts.version_num + 1, updated_at = now()\n'
+  || E'WHERE ui_layouts.layout_json::jsonb IS DISTINCT FROM EXCLUDED.layout_json::jsonb;\n',
   portal,
   md5('fsp-seed-layout:' || portal)::uuid, portal,
-  jsonb_pretty(layout_json::jsonb), schema_version, :'seed_person',
-  portal)
-FROM ui_layouts
-WHERE status = 'PUBLISHED'
+  jsonb_pretty(layout), schema_version, :'seed_person')
+FROM menus
 ORDER BY portal;
 SQL
 
+if grep -q '^MISSING-WIDGET' "$tmp"; then
+  echo "export-portal-menus: the menus place widgets core has not registered — register them in" >&2
+  echo "  the widget workbench (Registry → Register), then re-run:" >&2
+  grep '^MISSING-WIDGET' "$tmp" | sed 's/^MISSING-WIDGET /  - /' >&2
+  exit 1
+fi
+
 if ! grep -q "INSERT INTO ui_layouts" "$tmp"; then
-  echo "export-portal-menus: no PUBLISHED layouts found — nothing to export" >&2
+  echo "export-portal-menus: no portal layouts found — nothing to export" >&2
   exit 1
 fi
 
@@ -63,15 +90,15 @@ fi
 -- PORTAL MENUS — the published Portal Builder layouts + the widget registry they render.
 -- GENERATED by scripts/export-portal-menus.sh — edit menus in the builder, re-export, don't hand-edit.
 --
--- Repeatable seed (re-applied when this file changes), insert-if-absent only:
---   * a portal that already has a PUBLISHED layout keeps it (live changes are four-eyes,
---     UI_LAYOUT_PUBLISH, in the builder — never a migration);
---   * maker = platform-admin (system seed V2); no approval row — this is reviewed seed data;
---   * signed bundles are per-environment: after first boot run \`bun run portal:publish\` (frontend/).
+-- Menus ship like code (docs/portal-menus.md). Repeatable seed (re-applied when this file
+-- changes) and the REPO WINS: each portal's PUBLISHED layout and every widget below are set
+-- to exactly this on deploy. The pull request that changes this file is the review.
+--   * maker = platform-admin (system seed V2); no approval row;
+--   * core signs the bundles at boot (UiBundleBootSync) with each environment's own key.
 
 EOF
   echo "-- ===== widgets ====="
-  grep -v '^$' "$tmp" | sed -n '/^INSERT INTO ui_widgets/,/^ON CONFLICT/p'
+  grep -v '^$' "$tmp" | sed -n '/^INSERT INTO ui_widgets/,/IS DISTINCT FROM (EXCLUDED.version/p'
   echo
   echo "-- ===== published menus (one per portal) ====="
   awk '/^-- portal:/{p=1} p' "$tmp"
