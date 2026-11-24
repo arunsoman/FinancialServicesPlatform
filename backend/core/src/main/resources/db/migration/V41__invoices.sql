@@ -8,8 +8,12 @@
 -- State: DRAFT → ISSUED → PARTIALLY_PAID → PAID; DRAFT → VOID (at once);
 --        ISSUED (no money) → VOID_PENDING → VOID (second person approves) | ISSUED (rejected).
 -- Concurrency: optimistic @Version on invoices and payments (AGENTS §2d).
+--
+-- Re-runnable on purpose (IF NOT EXISTS / ON CONFLICT): this file was briefly V40 on a few dev
+-- databases before it was renumbered; MigrationHistoryRepair drops that stale history row and
+-- this migration then applies cleanly over the tables that already exist.
 
-CREATE TABLE invoices (
+CREATE TABLE IF NOT EXISTS invoices (
   id                 UUID PRIMARY KEY,
   seller_tenant_id   UUID        NOT NULL REFERENCES tenants(id),
   buyer_tenant_id    UUID        NOT NULL REFERENCES tenants(id),
@@ -37,12 +41,12 @@ CREATE TABLE invoices (
   CHECK (paid_minor <= total_minor)
 );
 
-CREATE UNIQUE INDEX ux_invoices_seller_number ON invoices (seller_tenant_id, number) WHERE number IS NOT NULL;
-CREATE INDEX ix_invoices_seller ON invoices (seller_tenant_id, status, due_date);
-CREATE INDEX ix_invoices_buyer  ON invoices (buyer_tenant_id, status, due_date);
-CREATE INDEX ix_invoices_created ON invoices (created_at DESC, id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_invoices_seller_number ON invoices (seller_tenant_id, number) WHERE number IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_invoices_seller ON invoices (seller_tenant_id, status, due_date);
+CREATE INDEX IF NOT EXISTS ix_invoices_buyer  ON invoices (buyer_tenant_id, status, due_date);
+CREATE INDEX IF NOT EXISTS ix_invoices_created ON invoices (created_at DESC, id);
 
-CREATE TABLE invoice_lines (
+CREATE TABLE IF NOT EXISTS invoice_lines (
   invoice_id       UUID    NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
   line_no          INT     NOT NULL,
   description      TEXT    NOT NULL,
@@ -55,7 +59,7 @@ CREATE TABLE invoice_lines (
   PRIMARY KEY (invoice_id, line_no)
 );
 
-CREATE TABLE invoice_payments (
+CREATE TABLE IF NOT EXISTS invoice_payments (
   id                UUID PRIMARY KEY,
   invoice_id        UUID        NOT NULL REFERENCES invoices(id),
   method            TEXT        NOT NULL CHECK (method IN ('WALLET', 'BANK_TRANSFER', 'CARD')),
@@ -72,10 +76,10 @@ CREATE TABLE invoice_payments (
   confirmed_at      timestamptz
 );
 
-CREATE INDEX ix_invoice_payments_invoice ON invoice_payments (invoice_id, created_at);
+CREATE INDEX IF NOT EXISTS ix_invoice_payments_invoice ON invoice_payments (invoice_id, created_at);
 
 -- Running numbers per seller and year; taken with one atomic UPSERT … RETURNING at issue.
-CREATE TABLE invoice_number_seq (
+CREATE TABLE IF NOT EXISTS invoice_number_seq (
   seller_tenant_id UUID NOT NULL REFERENCES tenants(id),
   year             INT  NOT NULL,
   last_value       INT  NOT NULL,

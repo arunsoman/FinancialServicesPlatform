@@ -464,7 +464,7 @@ These hold on every widget, every stage; [AGENTS.md](../AGENTS.md) is the full s
 | Money | Minor units, strings on the wire, BigInt or `long` in code, never floats; money moves only through a balanced journal entry or the EMI/PSP ledgers |
 | Idempotency | Every write carries an Idempotency-Key (the client libraries add it). Writes are never retried automatically |
 | Concurrency | Optimistic versions on every changing record; no database transaction or lock held across a remote call |
-| Migrations | Applied migrations are never edited; demo data never goes into migrations or the system seed |
+| Migrations | Applied migrations are never edited; demo data never goes into migrations or the system seed. Pull before you pick the next number; a test (`MigrationHistoryRepairTest`) fails the build if two files share a version. If a clash reaches a branch anyway: renumber the file that was never pushed, make it re-runnable (`IF NOT EXISTS` / `ON CONFLICT`), and add its old script name to `MigrationHistoryRepair.RETIRED_SCRIPTS` — databases that ran the old number then heal themselves at the next core start |
 | Shared working tree | No `git stash`, no `tsc -b` (use `bun run typecheck`), commit only when asked, never on main |
 
 ## Troubleshooting
