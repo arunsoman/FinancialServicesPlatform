@@ -5,15 +5,16 @@
 #   2. env/<environment>.params    per-environment, non-secret (names, ports, hosts, paths)
 #   3. release.env                 image digests of the release being deployed (immutable)
 #
-# Staging adds compose.stage-limits.yml on top (CPU/RAM caps). Production runs without caps,
+# Plugins come from compose.plugins.yml, GENERATED per bundle from backend/plugins/*/ (gen-plugins.py).
+# Staging adds compose.stage-limits.yml + compose.plugins.stage-limits.yml on top (CPU/RAM caps). Production runs without caps,
 # exactly like the hand-made stack it replaces (same container names, network, data paths).
 #
 # Never run this by hand with `docker compose up`: deploy.sh runs the preflight checks that stop
 # it from starting on an empty data directory or colliding with another stack on the host.
 
-x-logging: &logging
+x-logging: &logging   # per-environment rotation: staging 2 x 5 MB, production 3 x 10 MB per container
   driver: json-file
-  options: { max-size: "10m", max-file: "3" }   # container logs can never fill the disk
+  options: { max-size: "${FSP_LOG_MAX_SIZE:-10m}", max-file: "${FSP_LOG_MAX_FILES:-3}" }
 
 services:
   postgres:
@@ -24,12 +25,8 @@ services:
       POSTGRES_DB: fsp
       POSTGRES_USER: fsp
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-      # read by initdb/10-fsp-plugin-dbs.sh — only ever runs on an EMPTY data directory
-      FSP_PLUGIN_KYC_DB_PASSWORD: ${FSP_PLUGIN_KYC_DB_PASSWORD:-}
-      FSP_PLUGIN_INVENTORY_DB_PASSWORD: ${FSP_PLUGIN_INVENTORY_DB_PASSWORD:-}
     volumes:
       - ${FSP_DATA_DIR:?}/postgres:/var/lib/postgresql/data
-      - ${FSP_HOME:?}/initdb:/docker-entrypoint-initdb.d:ro
     networks: [fsp]
     security_opt: [seccomp=unconfined]
     logging: *logging
@@ -167,61 +164,6 @@ services:
     logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 8080 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 60
-      start_period: 30s
-
-  plugin-kyc:
-    image: ${FSP_IMAGE_KYC:?release.env must pin kyc}
-    container_name: ${FSP_PREFIX}-plugin-kyc
-    restart: unless-stopped
-    environment:
-      FSP_PLUGIN_KYC_DB_URL: jdbc:postgresql://postgres:5432/fsp_plugin_kyc
-      FSP_PLUGIN_KYC_DB_USER: fsp_plugin_kyc
-      FSP_PLUGIN_KYC_DB_PASSWORD: ${FSP_PLUGIN_KYC_DB_PASSWORD:?}
-      SERVER_PORT: 8083
-      FSP_GATEWAY_URL: http://gateway:8090
-      FSP_IDP_ISSUER: https://${FSP_AUTH_HOST}
-      FSP_PLUGIN_KYC_CLIENT_KEY: /opt/fsp/pki/plugin-kyc-client.pem
-      FSP_PLUGIN_KYC_DPOP_KEY: /opt/fsp/pki/plugin-kyc-dpop.pem
-      FSP_PLUGIN_KYC_CREATE_KEYS: "false"
-    volumes:
-      - ${FSP_CONF_DIR}/pki:/opt/fsp/pki:ro
-    networks: [fsp]
-    depends_on:
-      postgres: { condition: service_healthy }
-    logging: *logging
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 8083 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 60
-      start_period: 30s
-
-  plugin-inventory:
-    image: ${FSP_IMAGE_INVENTORY:?release.env must pin inventory}
-    container_name: ${FSP_PREFIX}-plugin-inventory
-    restart: unless-stopped
-    environment:
-      FSP_PLUGIN_INVENTORY_DB_URL: jdbc:postgresql://postgres:5432/fsp_plugin_inventory
-      FSP_PLUGIN_INVENTORY_DB_USER: fsp_plugin_inventory
-      FSP_PLUGIN_INVENTORY_DB_PASSWORD: ${FSP_PLUGIN_INVENTORY_DB_PASSWORD:?}
-      SERVER_PORT: 8084
-      FSP_GATEWAY_URL: http://gateway:8090
-      FSP_IDP_ISSUER: https://${FSP_AUTH_HOST}
-      FSP_PLUGIN_INVENTORY_KEK: ${FSP_PLUGIN_INVENTORY_KEK:?}
-      FSP_PLUGIN_INVENTORY_CLIENT_KEY: /opt/fsp/pki/plugin-inventory-client.pem
-      FSP_PLUGIN_INVENTORY_DPOP_KEY: /opt/fsp/pki/plugin-inventory-dpop.pem
-      FSP_PLUGIN_INVENTORY_CREATE_KEYS: "false"
-    volumes:
-      - ${FSP_CONF_DIR}/pki:/opt/fsp/pki:ro
-    networks: [fsp]
-    depends_on:
-      postgres: { condition: service_healthy }
-    logging: *logging
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 8084 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 60

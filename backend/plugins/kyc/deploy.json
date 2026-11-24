@@ -1,0 +1,5 @@
+{
+  "port": 8083,
+  "secrets": [],
+  "staging": { "cpus": 0.25, "mem": "384m", "heap": "160m" }
+}

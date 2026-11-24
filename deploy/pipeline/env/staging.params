@@ -20,7 +20,16 @@ FSP_PUBLIC_HOST=fsp.stage.afriqpay.com
 FSP_AUTH_HOST=fsp-auth.stage.afriqpay.com
 FSP_API_HOST=fsp-api.stage.afriqpay.com
 FSP_WEB_ROOT=/var/www/fsp.stage.afriqpay.com/html
-FSP_OVERLAYS=compose.stage-limits.yml
+FSP_OVERLAYS="compose.stage-limits.yml compose.plugins.stage-limits.yml"
 FSP_SLICE=fsp-stage.slice
 FSP_WAIT_SECONDS=1200
 FSP_REQUIRE_EXISTING_DATA=0
+FSP_LOG_MAX_SIZE=5m
+FSP_LOG_MAX_FILES=2
+# staging may create missing secrets/keys itself (e.g. for a newly added plugin); production never
+FSP_AUTOGEN_SECRETS=1
+# disk hygiene (deploy/monitoring/bin/fsp-ops.sh): logs, backups, bundles older than this are deleted
+FSP_KEEP_DAYS=4
+# observability (deploy/monitoring): release + plugin-drift metrics, per-env plugin manifests
+FSP_MONITOR_TEXTFILE=/home/ubuntu/fsp-monitor/textfile
+FSP_MANIFEST_ROOT=/var/www/fsp-monitor.stage.afriqpay.com/manifests

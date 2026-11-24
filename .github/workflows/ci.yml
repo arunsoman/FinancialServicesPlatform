@@ -36,7 +36,9 @@ jobs:
             frontend:
               - 'frontend/**'
             deploy:
-              - 'deploy/pipeline/**'
+              - 'deploy/**'
+              - 'backend/plugins/*/plugin-manifest.json'
+              - 'backend/plugins/*/deploy.json'
               - '.github/workflows/**'
 
   backend:
@@ -101,21 +103,54 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: shellcheck deploy scripts
-        run: shellcheck -S warning deploy/pipeline/scripts/*.sh deploy/pipeline/initdb/*.sh
+      - name: shellcheck deploy + monitoring scripts
+        run: shellcheck -S warning -x deploy/pipeline/scripts/*.sh deploy/monitoring/scripts/*.sh deploy/monitoring/bin/*.sh
       - name: compose renders for every environment
         run: |
           set -euo pipefail
-          cd deploy/pipeline
+          python3 deploy/pipeline/scripts/gen-plugins.py . /tmp/bundle
+          cp deploy/pipeline/compose*.yml /tmp/bundle/
+          cd /tmp/bundle
           printf '%s=x\n' POSTGRES_PASSWORD FSP_BOOTSTRAP_PASSWORD FSP_INTERNAL_CREDENTIAL FSP_PERSON_PASSWORD \
             FSP_PLUGIN_KYC_DB_PASSWORD FSP_PLUGIN_INVENTORY_DB_PASSWORD FSP_PLUGIN_INVENTORY_KEK > /tmp/secrets.env
-          for s in CORE IDP GATEWAY BFF KYC INVENTORY; do echo "FSP_IMAGE_$s=example/$s@sha256:$(printf %064d 0)"; done > /tmp/release.env
+          . ./plugins.env
+          for s in core idp gateway bff $FSP_PLUGINS; do echo "FSP_IMAGE_${s^^}=example/$s@sha256:$(printf %064d 0)"; done > /tmp/release.env
+          for p in $FSP_PLUGINS; do v="FSP_PLUGIN_${p^^}_SECRETS"; for x in ${!v}; do echo "$x=x" >> /tmp/secrets.env; done; done
           for e in staging production; do
-            overlays=$(grep '^FSP_OVERLAYS=' env/$e.params | cut -d= -f2)
-            args=(-f compose.yml); for o in $overlays; do args+=(-f "$o"); done
-            docker compose "${args[@]}" --env-file /tmp/secrets.env --env-file env/$e.params --env-file /tmp/release.env config --quiet
+            params="$GITHUB_WORKSPACE/deploy/pipeline/env/$e.params"
+            overlays=$(bash -c "set -a; . '$params'; echo \$FSP_OVERLAYS")
+            args=(-f compose.yml -f compose.plugins.yml); for o in $overlays; do args+=(-f "$o"); done
+            docker compose "${args[@]}" --env-file /tmp/secrets.env --env-file "$params" --env-file plugins.env \
+              --env-file /tmp/release.env config --quiet
             echo "compose OK for $e"
           done
+      - name: monitoring stack renders
+        run: |
+          cd deploy/monitoring
+          printf 'GRAFANA_ADMIN_PASSWORD=x\n' > /tmp/mon.env
+          docker compose -f compose.yml --env-file monitor.params --env-file /tmp/mon.env config --quiet
+          docker run --rm -v "$PWD/prometheus:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:v3.16.0 \
+            check config /etc/prometheus/prometheus.yml
+          docker run --rm -e LOKI_RETENTION_STAGING=96h -e LOKI_RETENTION_PRODUCTION=720h -v "$PWD/loki:/l:ro" \
+            grafana/loki:3.7.10 -config.file=/l/loki.yml -config.expand-env=true -verify-config
+          docker run --rm -v "$PWD/alloy:/a:ro" grafana/alloy:v1.22.0 fmt /a/config.alloy >/dev/null
+          for f in grafana/dashboards/*.json; do python3 -m json.tool "$f" >/dev/null; done
+
+  plugins:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Plugin manifests only grow within a major version (rollback-safe)
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: |
+          case "$BASE" in ''|0000000000000000000000000000000000000000) BASE="" ;; esac
+          python3 deploy/pipeline/scripts/check-plugin-manifests.py "$BASE"
+      - name: Plugin folders generate a valid bundle
+        run: python3 deploy/pipeline/scripts/gen-plugins.py . /tmp/bundle
 
   security:
     runs-on: ubuntu-24.04

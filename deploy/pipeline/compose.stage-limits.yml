@@ -7,7 +7,8 @@
 #   3. Lowest priority under contention: cpu_shares 128 (default 1024) and oom_score_adj 500,
 #      so when the host is short of CPU or memory, staging yields and is OOM-killed first.
 #
-# Budget (sum of ceilings): 4.39 GiB RAM, 2.55 CPUs — inside the slice's 4.5 GiB / 1.5 CPUs.
+# Plugin caps are generated (compose.plugins.stage-limits.yml) from each plugin's deploy.json.
+# Budget with kyc + inventory: 4.39 GiB RAM, 2.55 CPUs — deploy.sh warns if the sum exceeds the slice.
 # Measured idle footprint (JDK 25, Spring Boot 4): metaspace 85-110 MiB, live heap < 150 MiB.
 # TigerBeetle allocates all its memory at start: ~1.5 GiB even in --development with a 64 MiB grid.
 #
@@ -84,14 +85,4 @@ services:
 
   bff:
     <<: *small-jvm
-    environment: *small-jvm-env
-
-  plugin-kyc:
-    <<: *small-jvm
-    cpus: 0.25
-    environment: *small-jvm-env
-
-  plugin-inventory:
-    <<: *small-jvm
-    cpus: 0.25
     environment: *small-jvm-env

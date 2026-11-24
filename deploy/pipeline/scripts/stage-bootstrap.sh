@@ -20,36 +20,23 @@ die() { printf 'ABORT: %s\n' "$*" >&2; exit 1; }
 [ "$(id -un)" = ubuntu ] || die "run as the deploy user (ubuntu)"
 sudo -v
 
-# --- 1. directories + secrets (generated once, chmod 600, never leave the server) -----------
+# --- 1. directories + core secrets (generated once, chmod 600, never leave the server) ------
 log "directories under $FSP_HOME"
 mkdir -p "$FSP_CONF_DIR/pki" "$FSP_DATA_DIR/postgres" "$FSP_DATA_DIR/tigerbeetle" \
-         "$FSP_BACKUP_DIR" "$FSP_HOME/releases" "$FSP_HOME/initdb"
+         "$FSP_BACKUP_DIR" "$FSP_HOME/releases"
 chmod 700 "$FSP_CONF_DIR" "$FSP_CONF_DIR/pki"
 
-if [ ! -s "$FSP_CONF_DIR/.env" ]; then
-  log "generating staging secrets → $FSP_CONF_DIR/.env"
-  umask 077
-  cat > "$FSP_CONF_DIR/.env" <<EOF
-# FSP STAGING secrets — generated $(date -u +%FT%TZ) on $(hostname). Never copy to production.
-POSTGRES_PASSWORD=$(openssl rand -hex 24)
-FSP_BOOTSTRAP_PASSWORD=$(openssl rand -hex 12)
-FSP_INTERNAL_CREDENTIAL=$(openssl rand -hex 32)
-FSP_PERSON_PASSWORD=$(openssl rand -hex 12)
-FSP_PLUGIN_KYC_DB_PASSWORD=$(openssl rand -hex 24)
-FSP_PLUGIN_INVENTORY_DB_PASSWORD=$(openssl rand -hex 24)
-FSP_PLUGIN_INVENTORY_KEK=$(openssl rand -hex 32)
-EOF
-  umask 022
-else
-  log "secrets already present — kept"
-fi
-
-log "staging signing keys (distinct from production)"
-gen() { [ -s "$FSP_CONF_DIR/pki/$1.pem" ] || (umask 077; openssl genpkey "${@:2}" -out "$FSP_CONF_DIR/pki/$1.pem" 2>/dev/null); }
-gen idp-signing             -algorithm RSA -pkeyopt rsa_keygen_bits:2048
-for k in gateway-assertion plugin-kyc-client plugin-kyc-dpop plugin-inventory-client plugin-inventory-dpop; do
-  gen "$k" -algorithm EC -pkeyopt ec_paramgen_curve:P-256
+# shellcheck source=lib-secrets.sh
+. "$HERE/scripts/lib-secrets.sh"
+[ -s "$FSP_CONF_DIR/.env" ] || (umask 077; echo "# FSP STAGING secrets — generated on $(hostname). Never copy to production." > "$FSP_CONF_DIR/.env")
+for n in POSTGRES_PASSWORD FSP_BOOTSTRAP_PASSWORD FSP_INTERNAL_CREDENTIAL FSP_PERSON_PASSWORD; do
+  ensure_env_secret "$FSP_CONF_DIR/.env" "$n"
 done
+log "staging signing keys (distinct from production)"
+ensure_key "$FSP_CONF_DIR/pki" idp-signing       -algorithm RSA -pkeyopt rsa_keygen_bits:2048
+ensure_key "$FSP_CONF_DIR/pki" gateway-assertion -algorithm EC  -pkeyopt ec_paramgen_curve:P-256
+# plugin DB passwords, extra secrets and client/DPoP keys are created by deploy.sh on first deploy
+# (FSP_AUTOGEN_SECRETS=1), from each backend/plugins/<code>/deploy.json — new plugins need no step here.
 
 # --- 2. docker network (own subnet; refuse overlap) -------------------------------------------
 if ! docker network inspect "$FSP_NETWORK" >/dev/null 2>&1; then

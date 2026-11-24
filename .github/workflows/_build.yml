@@ -57,10 +57,13 @@ jobs:
         if: steps.existing.outputs.build == 'true'
         working-directory: backend
         run: |
-          ./gradlew --no-daemon :core:bootJar :idp:bootJar :gateway:bootJar :bff:bootJar \
-            :plugins:kyc:bootJar :plugins:inventory:bootJar
+          # every backend/plugins/<code>/ with a plugin-manifest.json is a plugin (gen-plugins.py)
+          plugins=$(for f in plugins/*/plugin-manifest.json; do basename "$(dirname "$f")"; done)
+          tasks=(:core:bootJar :idp:bootJar :gateway:bootJar :bff:bootJar)
+          for p in $plugins; do tasks+=(":plugins:$p:bootJar"); done
+          ./gradlew --no-daemon "${tasks[@]}"
           mkdir -p ../.image/jars
-          for m in core idp gateway bff plugins/kyc plugins/inventory; do
+          for m in core idp gateway bff $(for p in $plugins; do echo "plugins/$p"; done); do
             for jar in "$m"/build/libs/*.jar; do
               case "$jar" in *-plain.jar) ;; *) cp "$jar" "../.image/jars/$(basename "$m").jar" ;; esac
             done
@@ -97,7 +100,8 @@ jobs:
           labels=(--label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
                   --label "org.opencontainers.image.revision=$GITHUB_SHA"
                   --label "com.afriqpay.fsp.tree=$TREE")
-          for svc in core idp gateway bff kyc inventory; do
+          for jar in .image/jars/*.jar; do
+            svc=$(basename "$jar" .jar)
             docker buildx build --push --provenance=mode=max --sbom=true "${labels[@]}" \
               -f deploy/afriqpay-runtime/Dockerfile.runtime --build-arg "JAR=jars/$svc.jar" \
               -t "$REG/fsp-$svc:tree-$TREE" -t "$REG/fsp-$svc:sha-$GITHUB_SHA" .image

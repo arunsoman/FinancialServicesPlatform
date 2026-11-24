@@ -65,7 +65,8 @@ jobs:
           cp deploy/pipeline/compose*.yml bundle/
           cp "deploy/pipeline/env/$ENVIRONMENT.params" bundle/params.env
           cp .release/release.env bundle/release.env
-          cp -r deploy/pipeline/initdb deploy/pipeline/scripts bundle/
+          cp -r deploy/pipeline/scripts bundle/
+          python3 deploy/pipeline/scripts/gen-plugins.py . bundle   # plugins from backend/plugins/*/
           echo "FSP_HOME=$(grep '^FSP_HOME=' bundle/params.env | cut -d= -f2)" >> "$GITHUB_ENV"
 
       - name: SSH identity
@@ -100,7 +101,14 @@ jobs:
           rsync -a --delete --mkpath bundle/ "fsp-target:$dest/"
           # shellcheck disable=SC2029  # expanded on the runner on purpose; token goes over stdin
           printf '%s\n' "$GHCR_TOKEN" \
-            | ssh fsp-target env GHCR_USER="$GITHUB_ACTOR" bash "$dest/scripts/deploy.sh" "$dest" "$NAME" "$MODE"
+            | ssh fsp-target env GHCR_USER="$GITHUB_ACTOR" bash "$dest/scripts/deploy.sh" "$dest" "$NAME" "$MODE" \
+            | tee deploy.log
+          # plugin drift → run summary (registration is a four-eyes act in the admin portal)
+          if grep -q '^plugin drift' deploy.log; then
+            { echo '### Plugin drift'; echo '```'; sed -n '/^plugin drift/,$p' deploy.log; echo '```'
+              echo 'Not in sync → admin portal › Plugins › Register (maker) with the manifest shown, then a different admin approves (checker). Grafana › FSP releases & plugins lists every version.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Tag release
         if: inputs.create_tag && inputs.mode == 'deploy'

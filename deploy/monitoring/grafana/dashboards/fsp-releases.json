@@ -1,0 +1,608 @@
+{
+  "uid": "fsp-releases",
+  "title": "FSP releases & plugins",
+  "description": "What runs where, what you can roll back to, and which plugin versions still need a four-eyes registration.",
+  "tags": [
+    "fsp"
+  ],
+  "timezone": "utc",
+  "editable": false,
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "repo",
+        "type": "constant",
+        "query": "arunsoman/FinancialServicesPlatform",
+        "hide": 2,
+        "current": {
+          "text": "arunsoman/FinancialServicesPlatform",
+          "value": "arunsoman/FinancialServicesPlatform"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "How to",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 7
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Roll back to a tagged release\n1. Pick a release in **Releases you can roll back to** and click **Roll back to this release** \u2014 it opens the GitHub *rollback* workflow.\n2. **Run workflow** \u2192 choose the environment, paste the release name (e.g. `prod-2026.12.01-42`), give a reason.\n3. Production asks a second person to approve. Nothing is rebuilt: the tag's exact images come back; the database stays (expand/contract migrations).\n\n### Upgrade (or downgrade) a plugin version\n1. In **Plugin drift**, anything not `in_sync` needs a registration. **Open manifest** shows the exact JSON for *that environment* (its own public key is already in it).\n2. Admin portal \u203a **Plugins** \u203a **Register**: paste the manifest (maker). A **different** admin approves it in **Approvals** (checker). Within 5 minutes the row turns `in_sync`.\n3. **Plugin versions you can register** lists every version shipped to an environment \u2014 register an older one to go back.\n\nReleases + plugin data refresh every 5 minutes and after every deploy. Logs \u2192 *FSP logs*; CPU/RAM/disk \u2192 *FSP containers & disk*."
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Running now",
+      "description": "What each environment runs. Different commits = staging and production have drifted (normal between a staging deploy and its promotion).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 12,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "fsp_release_info",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "Value": true
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "commit"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Commit on GitHub",
+                    "url": "https://github.com/${repo}/commit/${__data.fields.commit}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "release"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Code at this tag",
+                    "url": "https://github.com/${repo}/tree/${__data.fields.release}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Staging vs production",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 7,
+        "w": 12,
+        "h": 5
+      },
+      "description": "1 distinct commit = production runs what staging runs. 2 = staging is ahead (or production was rolled back). Compare the commits in 'Running now'.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "instant": true,
+          "expr": "count(count by (commit) (fsp_release_info{env=~\"staging|production\"}))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Same commit",
+                  "color": "green",
+                  "index": 0
+                },
+                "2": {
+                  "text": "Drifted \u2014 staging \u2260 production",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Releases you can roll back to",
+      "description": "Release bundles kept on the server. Older tags can still be rolled back to from GitHub \u203a Actions \u203a rollback.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "fsp_release_available",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "Value": true
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "release"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Roll back to this release",
+                    "url": "https://github.com/${repo}/actions/workflows/rollback.yml",
+                    "targetBlank": true
+                  },
+                  {
+                    "title": "Code at this tag",
+                    "url": "https://github.com/${repo}/tree/${__data.fields.release}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "commit"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Commit on GitHub",
+                    "url": "https://github.com/${repo}/commit/${__data.fields.commit}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Plugin drift",
+      "description": "shipped = plugin version the running process has; registered = what the gateway routes. Registration is four-eyes in the admin portal (machines are never maker or checker).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "fsp_plugin_drift",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "Value": true
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "manifest_url"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open manifest (copy into Admin \u203a Plugins \u203a Register)",
+                    "url": "${__data.fields.manifest_url}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "state"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "in_sync": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "pending_approval": {
+                        "color": "blue",
+                        "index": 1
+                      },
+                      "behind": {
+                        "color": "orange",
+                        "index": 2
+                      },
+                      "not_registered": {
+                        "color": "red",
+                        "index": 3
+                      },
+                      "ahead": {
+                        "color": "orange",
+                        "index": 4
+                      },
+                      "key_mismatch": {
+                        "color": "red",
+                        "index": 5
+                      },
+                      "content_mismatch": {
+                        "color": "red",
+                        "index": 6
+                      },
+                      "plugin_down": {
+                        "color": "red",
+                        "index": 7
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "env"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Staging admin portal",
+                    "url": "https://fsp.stage.afriqpay.com/admin/",
+                    "targetBlank": true
+                  },
+                  {
+                    "title": "Production admin portal",
+                    "url": "https://fsp.afriqpay.com/admin/",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 6,
+      "type": "bargauge",
+      "title": "Operations shipped but not routed",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "fsp_plugin_unrouted_operations",
+          "legendFormat": "{{env}} {{code}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Plugin versions you can register (upgrade / downgrade)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 28,
+        "w": 16,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "fsp_plugin_manifest_available",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "Value": true
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "manifest_url"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open manifest",
+                    "url": "${__data.fields.manifest_url}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "FSP",
+      "type": "dashboards",
+      "tags": [
+        "fsp"
+      ],
+      "asDropdown": false
+    }
+  ]
+}

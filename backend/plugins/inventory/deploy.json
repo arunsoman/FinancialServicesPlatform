@@ -1,0 +1,5 @@
+{
+  "port": 8084,
+  "secrets": ["FSP_PLUGIN_INVENTORY_KEK"],
+  "staging": { "cpus": 0.25, "mem": "384m", "heap": "160m" }
+}

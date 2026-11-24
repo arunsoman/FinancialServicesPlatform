@@ -1,0 +1,56 @@
+# Deploy / update the FSP monitoring stack (Grafana + Loki + Prometheus + Alloy) on the server.
+# One stack watches staging AND production; it lives with staging (fsp-monitor.stage /
+# prom.stage .afriqpay.com) and uses the staging environment's SSH secrets.
+# First time: run deploy/monitoring/scripts/monitor-bootstrap.sh (sudo) — see deploy/pipeline/README.md.
+name: monitoring
+
+on:
+  push:
+    branches: [staging]
+    paths: ['deploy/monitoring/**', '.github/workflows/monitoring.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitoring
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: staging
+      url: https://fsp-monitor.stage.afriqpay.com
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: SSH identity
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?missing secret}" "${DEPLOY_USER:?}" "${DEPLOY_SSH_KEY:?}" "${DEPLOY_KNOWN_HOSTS:?}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host fsp-target
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ServerAliveInterval 30
+          EOF
+      - name: Sync + start
+        run: |
+          set -euo pipefail
+          home=$(grep '^FSP_MON_HOME=' deploy/monitoring/monitor.params | cut -d= -f2)
+          rsync -a --delete --mkpath deploy/monitoring/ "fsp-target:$home/stack/"
+          # shellcheck disable=SC2029  # path expanded on the runner on purpose
+          ssh fsp-target bash "$home/stack/scripts/monitor-up.sh"

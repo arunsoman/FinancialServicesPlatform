@@ -1,0 +1,65 @@
+# Loki — single process, filesystem storage, retention enforced by the compactor.
+#   env="staging"     → deleted after ${LOKI_RETENTION_STAGING}   (4 days)
+#   everything else   → deleted after ${LOKI_RETENTION_PRODUCTION} (30 days)
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  log_level: warn
+
+common:
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+
+schema_config:
+  configs:
+    - from: "2026-01-01"
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: ${LOKI_RETENTION_PRODUCTION}
+  retention_stream:
+    - selector: '{env="staging"}'
+      priority: 1
+      period: ${LOKI_RETENTION_STAGING}
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 4
+  ingestion_burst_size_mb: 8
+  per_stream_rate_limit: 2MB
+  max_query_lookback: ${LOKI_RETENTION_PRODUCTION}
+  max_query_series: 2000
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 1h
+  retention_delete_worker_count: 20
+  delete_request_store: filesystem
+
+ingester:
+  chunk_idle_period: 30m
+  max_chunk_age: 2h
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 32
+
+analytics:
+  reporting_enabled: false

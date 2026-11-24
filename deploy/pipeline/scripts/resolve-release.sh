@@ -14,7 +14,11 @@ ROOT="$(git rev-parse --show-toplevel)"
   echo "FSP_REGISTRY=$REG"
   echo "FSP_RELEASE_TREE=$TREE"
   echo "FSP_RELEASE_COMMIT=$COMMIT"
-  for svc in core idp gateway bff kyc inventory web; do
+  # plugins = backend/plugins/<code>/plugin-manifest.json at that commit (gen-plugins.py contract)
+  plugins="$(git -C "$ROOT" ls-tree -d --name-only "$COMMIT" backend/plugins/ | while read -r d; do
+    git -C "$ROOT" cat-file -e "$COMMIT:$d/plugin-manifest.json" 2>/dev/null && basename "$d"; done)"
+  # shellcheck disable=SC2086
+  for svc in core idp gateway bff $plugins web; do
     ref="$REG/fsp-$svc:tree-$TREE"
     digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' 2>/dev/null | jq -r .digest)" || true
     if [ -z "${digest:-}" ] || [ "$digest" = null ]; then echo "missing image $ref" >&2; exit 3; fi
