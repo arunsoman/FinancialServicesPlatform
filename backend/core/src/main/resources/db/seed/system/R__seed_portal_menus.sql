@@ -107,6 +107,13 @@ ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, label = EXCLUDED.labe
 WHERE (ui_widgets.version, ui_widgets.label, ui_widgets.category, ui_widgets.bundle, ui_widgets.portals, ui_widgets.requires, ui_widgets.status)
   IS DISTINCT FROM (EXCLUDED.version, EXCLUDED.label, EXCLUDED.category, EXCLUDED.bundle, EXCLUDED.portals, EXCLUDED.requires, EXCLUDED.status);
 INSERT INTO ui_widgets (id, version, label, category, bundle, portals, requires, status, registered_by, bundle_sha256)
+VALUES ('org.branches', '1.0.0', 'Branches', 'Access', 'widgets/org-branches', '["admin","manufacturer","distributor","wholesaler","merchant"]', '["role.view","role.manage"]', 'ACTIVE', '00000000-0000-0000-0000-000000000201', NULL)
+ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, label = EXCLUDED.label,
+  category = EXCLUDED.category, bundle = EXCLUDED.bundle, portals = EXCLUDED.portals,
+  requires = EXCLUDED.requires, status = EXCLUDED.status, updated_at = now()
+WHERE (ui_widgets.version, ui_widgets.label, ui_widgets.category, ui_widgets.bundle, ui_widgets.portals, ui_widgets.requires, ui_widgets.status)
+  IS DISTINCT FROM (EXCLUDED.version, EXCLUDED.label, EXCLUDED.category, EXCLUDED.bundle, EXCLUDED.portals, EXCLUDED.requires, EXCLUDED.status);
+INSERT INTO ui_widgets (id, version, label, category, bundle, portals, requires, status, registered_by, bundle_sha256)
 VALUES ('overview.tiles', '1.0.0', 'Overview', 'Overview', 'widgets/overview-tiles', '["admin","manufacturer","distributor","wholesaler","merchant"]', '["audit.view"]', 'ACTIVE', '00000000-0000-0000-0000-000000000201', NULL)
 ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, label = EXCLUDED.label,
   category = EXCLUDED.category, bundle = EXCLUDED.bundle, portals = EXCLUDED.portals,
@@ -313,7 +320,7 @@ VALUES ('1f04eabd-9214-d45d-c84c-71b8c3221e97', 'admin', 'PUBLISHED', '{
                     "label": "Branch",
                     "placedWidgets": [
                         {
-                            "id": "weeffd624fb",
+                            "id": "w05883e86cf",
                             "span": {
                                 "lg": 12,
                                 "md": 12,
@@ -322,7 +329,7 @@ VALUES ('1f04eabd-9214-d45d-c84c-71b8c3221e97', 'admin', 'PUBLISHED', '{
                             },
                             "config": {
                             },
-                            "widgetId": "menu.placeholder"
+                            "widgetId": "org.branches"
                         }
                     ]
                 },

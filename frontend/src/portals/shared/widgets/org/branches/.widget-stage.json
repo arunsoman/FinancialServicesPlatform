@@ -176,6 +176,11 @@
     {
       "at": "2026-11-23T06:56:54.371Z",
       "event": "done"
+    },
+    {
+      "at": "2026-11-24T07:23:34.369Z",
+      "event": "registered",
+      "detail": "org.branches@1.0.0 by platform-admin"
     }
   ],
   "requirement": "Branches screen: create a branch (name), list with search, edit and delete; every change maker-checker approved; list shows name, who created, who approved, created date and time",
@@ -224,7 +229,7 @@
     }
   },
   "registered": {
-    "at": "2026-11-23T06:31:54.823Z",
+    "at": "2026-11-24T07:23:34.292Z",
     "version": "1.0.0",
     "by": "platform-admin",
     "uiHash": "9f1ef221c2a1b0b1"
