@@ -213,11 +213,15 @@
     {
       "at": "2026-11-24T04:04:55.379Z",
       "event": "done"
+    },
+    {
+      "at": "2026-11-24T04:56:35.077Z",
+      "event": "verify-ok"
     }
   ],
   "requirement": "Invoicing with 30-day credit terms by default and built-in payment options (e-money wallet, bank transfer, card via PSP hosted page), a menu entry in every portal, integrated with core",
   "verify": {
-    "at": "2026-11-24T04:03:35.056Z",
+    "at": "2026-11-24T04:56:35.077Z",
     "ok": true,
     "uiHash": "41e7d6082ca512c0",
     "steps": [

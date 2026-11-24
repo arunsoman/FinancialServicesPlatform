@@ -304,7 +304,7 @@ git diff --stat -- backend/core/src/main/resources/db/seed/system/R__seed_portal
 # 5. commit the seed together with what it depends on
 git add backend/core/src/main/resources/db/seed/system/R__seed_portal_menus.sql
 git add frontend/src/portals/shared/widgets/billing/invoices          # new widget code, if any
-git add backend/core/src/main/resources/db/migration/V40__invoices.sql # new migrations, if any
+git add backend/core/src/main/resources/db/migration/V41__invoices.sql # new migrations, if any
 git commit -m "feat(menus): every portal: + Billing › Invoices"
 
 # 6. push and open the pull request
