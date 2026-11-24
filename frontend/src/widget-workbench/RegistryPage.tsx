@@ -1,30 +1,12 @@
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { apiGet, apiPut, readProblem } from '../portals/shared/web-core/api';
-import type { WidgetDef } from '../portals/shared/widgets/core/manifest';
+import { readProblem } from '../portals/shared/web-core/api';
 import { WIDGETS } from '../portals/shared/widgets/registry';
 import { useConnection } from './connection';
-import { REGISTRY_ORDERS, registration, requiresText, sortByCreated, spansText } from './model';
+import { useRegisterWidget, useServerWidgets } from './registration';
+import { REGISTRY_ORDERS, requiresText, sortByCreated, spansText } from './model';
 import type { RegistryOrder } from './model';
 
-/** core UiDtos.WidgetView */
-interface ServerWidget {
-  id: string;
-  version: string;
-  label: string;
-  category: string | null;
-  bundle: string;
-  portals: string[];
-  requires: string[];
-  bundleSha256: string | null;
-  status: string;
-  updatedAt: string;
-  /** first registration — a re-registration never moves it */
-  createdAt: string | null;
-}
-
-const SERVER_KEY = ['ui', 'widgets', 'server'] as const;
 
 /**
  * What the portal builder can discover (SME registry-page): the widgets this build
@@ -33,18 +15,10 @@ const SERVER_KEY = ['ui', 'widgets', 'server'] as const;
  */
 export function RegistryPage() {
   const conn = useConnection();
-  const qc = useQueryClient();
   const connected = conn.status === 'connected';
 
-  const server = useQuery({
-    queryKey: SERVER_KEY,
-    queryFn: () => apiGet<ServerWidget[]>('/api/ui/widgets'),
-    enabled: connected,
-  });
-  const register = useMutation({
-    mutationFn: (def: WidgetDef) => apiPut<ServerWidget>('/api/ui/widgets', registration(def)),
-    onSettled: () => qc.invalidateQueries({ queryKey: SERVER_KEY }),
-  });
+  const server = useServerWidgets();
+  const register = useRegisterWidget();
 
   const onServer = new Map((server.data ?? []).map((w) => [w.id, w]));
   const local = new Map(WIDGETS.map((w) => [w.id, w.version]));

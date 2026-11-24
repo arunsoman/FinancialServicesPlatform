@@ -12,6 +12,7 @@ import { useConnection } from './connection';
 import type { Geometry } from './measure';
 import { FIXTURE_ORG, PORTAL_CONTEXTS, TIER_LABEL, defaultContext } from './model';
 import { NetworkTable } from './NetworkTable';
+import { RegisterButton } from './RegisterButton';
 import { WidgetFrame } from './WidgetFrame';
 import type { FrameSetup } from './WidgetFrame';
 
@@ -143,6 +144,7 @@ export function WidgetPage() {
             {def.label} <span className="mono dim">{def.id}@{def.version}</span>
           </h1>
           <p className="dim">{def.description}</p>
+          <RegisterButton def={def} />
         </div>
 
         <div className="controls">
