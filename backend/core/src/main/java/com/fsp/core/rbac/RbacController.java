@@ -32,7 +32,10 @@ public class RbacController {
             .toList();
     }
 
-    @FspOperation(id = "rbac.permission.me", component = "rbac", title = "My effective permissions")
+    /** Also answers a plugin acting for the person (DELEGATED): it learns only that person's own
+     *  keys and checker flag — how the KYC plugin shows decision controls without reading core tables. */
+    @FspOperation(id = "rbac.permission.me", component = "rbac", title = "My effective permissions",
+        actors = {Actor.ActorType.PERSON, Actor.ActorType.DELEGATED})
     @GetMapping("/v1/me/permissions")
     public Map<String, Object> myPermissions(jakarta.servlet.http.HttpServletRequest request) {
         Actor actor = actor(request);

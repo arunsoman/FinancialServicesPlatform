@@ -228,7 +228,7 @@ public class KycOnboardingSagaService {
             throw new ApiProblemException("MAKER_CANNOT_APPROVE",
                 "Checker cannot be the maker (four-eyes at person_id)", 403);
         }
-        if (!caseService.isChecker(checkerPersonId)) {
+        if (!caseService.isChecker(actorAssertion)) {
             throw new ApiProblemException("CHECKER_NOT_ENABLED",
                 "Only designated checkers may decide KYC cases", 403);
         }

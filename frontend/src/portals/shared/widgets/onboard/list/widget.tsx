@@ -24,13 +24,16 @@ import type { Notice } from '../../kit/Notice';
 import { isForbidden, toProblem } from '../../kit/problem';
 import { can as canAny, useSession } from '../../../web-core/session-core';
 import { readProblem } from '../../../web-core/api';
+import { useWidgetLink } from '../../../../signed/signed-layout';
 import {
   useOrgPage, useKycCasePage, joinOrgsToKyc, DEFAULT_QUERY, PAGE_SIZES,
   type OrgListQuery, type OrgWithKyc, type KycListQuery, KYC_DEFAULT_QUERY,
 } from './model';
-import { emptyForm, useCaseCommand, useMasterValues, useNextLevel } from '../../kyc/manage/model';
-import type { CaseFormValues } from '../../kyc/manage/model';
+import { emptyForm, formFromView, isEditableStatus, useCase, useCaseCommand, useMasterValues, useNextLevel } from '../../kyc/manage/model';
+import type { CaseFormValues, Decision } from '../../kyc/manage/model';
 import { CaseForm } from '../../kyc/manage/CaseForm';
+import { CaseDetails, TABS } from '../../kyc/manage/CaseDetails';
+import type { TabId } from '../../kyc/manage/CaseDetails';
 
 const SORT_KEYS = ['legalName', 'status', 'createdAt', 'subType'] as const;
 type SortKey = (typeof SORT_KEYS)[number];
@@ -44,12 +47,17 @@ interface OrgTableProps {
   rows: OrgWithKyc[];
   query: OrgListQuery;
   onSort: (key: string) => void;
-  onOpen: (row: OrgWithKyc) => void;
+  /** "Users": pick the org on this screen — the users panel below shows its people */
+  onUsers: (row: OrgWithKyc) => void;
+  /** "KYC": open the org's KYC case here, in a drawer (review, decide) */
+  onKyc: (row: OrgWithKyc) => void;
+  /** the org whose users the panel below shows */
+  pickedId: string | null;
   /** set when the viewer holds tenant.act_as: "Act as" per ACTIVE row (core re-decides on start) */
   actAs?: { busyId: string | null; onActAs: (row: OrgWithKyc) => void };
 }
 
-function OrgTable({ rows, query, onSort, onOpen, actAs }: OrgTableProps) {
+function OrgTable({ rows, query, onSort, onUsers, onKyc, pickedId, actAs }: OrgTableProps) {
   const { key: sortKey, dir } = parseSort(query.sort);
   return (
     <div className="overflow-x-auto">
@@ -84,19 +92,16 @@ function OrgTable({ rows, query, onSort, onOpen, actAs }: OrgTableProps) {
                 </th>
               );
             })}
-            {actAs && <th scope="col" className="border-b border-line px-3 py-2 text-right font-bold"><span className="sr-only">Actions</span></th>}
+            <th scope="col" className="border-b border-line px-3 py-2 text-right font-bold"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr
               key={r.id}
-              tabIndex={0}
-              onClick={() => onOpen(r)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(r); }
-              }}
-              className="cursor-pointer outline-none transition-colors hover:bg-raised focus-visible:bg-raised"
+              data-org={r.id}
+              aria-selected={pickedId === r.id}
+              className={clsx('transition-colors hover:bg-raised', pickedId === r.id && 'bg-raised')}
             >
               <td className="max-w-[320px] border-b border-line px-3 py-2.5">
                 <div className="truncate text-sm font-semibold">{r.legalName ?? r.id}</div>
@@ -118,9 +123,28 @@ function OrgTable({ rows, query, onSort, onOpen, actAs }: OrgTableProps) {
                 {r.kycRiskRating ? <Chip tone={r.kycRiskRating === 'HIGH' ? 'warn' : 'neutral'}>{r.kycRiskRating}</Chip> : '—'}
               </td>
               <td className="text-dim whitespace-nowrap border-b border-line px-3 py-2.5 text-right text-xs tabular-nums">{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '—'}</td>
-              {actAs && (
-                <td className="whitespace-nowrap border-b border-line px-3 py-2.5 text-right">
-                  {r.status === 'ACTIVE' && (
+              <td className="whitespace-nowrap border-b border-line px-3 py-2.5 text-right">
+                <div className="inline-flex gap-1.5">
+                  <Button
+                    variant="ghost"
+                    data-action="org.users"
+                    aria-label={`Users of ${r.legalName ?? r.id}`}
+                    aria-pressed={pickedId === r.id}
+                    onClick={() => onUsers(r)}
+                  >
+                    Users
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    data-action="org.kyc"
+                    disabled={!r.hasKyc || !r.kycCaseId}
+                    title={r.hasKyc ? undefined : 'No KYC case for this organization'}
+                    aria-label={`KYC of ${r.legalName ?? r.id}`}
+                    onClick={() => onKyc(r)}
+                  >
+                    KYC
+                  </Button>
+                  {actAs && r.status === 'ACTIVE' && (
                     <Button
                       variant="ghost"
                       data-action="act-as"
@@ -128,14 +152,13 @@ function OrgTable({ rows, query, onSort, onOpen, actAs }: OrgTableProps) {
                       aria-busy={actAs.busyId === r.id}
                       aria-label={`Act as ${r.legalName ?? r.id}`}
                       title="Work as this organization — manage its users, roles and onboarding. Audited as you."
-                      onClick={(e) => { e.stopPropagation(); actAs.onActAs(r); }}
-                      onKeyDown={(e) => e.stopPropagation()}
+                      onClick={() => actAs.onActAs(r)}
                     >
                       {actAs.busyId === r.id ? 'Starting…' : 'Act as'}
                     </Button>
                   )}
-                </td>
-              )}
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -181,6 +204,7 @@ export function OnboardList(props: WidgetRuntimeProps<OnboardListConfig>) {
   const parentOrg = scope === 'selected' ? (context.selection.orgId ?? (session.actAs ? workingOrg : '')) : workingOrg;
   const readOnly = parentOrg !== '' && parentOrg !== workingOrg;
   const navigate = useNavigate();
+  const linkTo = useWidgetLink();
   const [params, setParams] = useSearchParams();
   const query = useMemo((): OrgListQuery => {
     const [sk, sd] = (params.get('osort') ?? '').split(',');
@@ -236,7 +260,7 @@ export function OnboardList(props: WidgetRuntimeProps<OnboardListConfig>) {
   const canCreate = context.permissions.includes('org.onboard_child');
   const canOnboardHere = !readOnly && childSubType !== null;
   const formOpen = params.get('onew') === '1' && canOnboardHere;
-  const master = useMasterValues(port, formOpen);
+  const master = useMasterValues(port, formOpen || !!params.get('case'));
   const cmd = useCaseCommand(port);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -254,13 +278,13 @@ export function OnboardList(props: WidgetRuntimeProps<OnboardListConfig>) {
     setNotice(null);
     try {
       await session.startActAs(r.id);
-      navigate('/users');
+      navigate(linkTo('users.organization') ?? '/');
     } catch (e) {
       say('bad', `Couldn’t act as ${r.legalName ?? 'this organization'} — ${readProblem(e).detail}`);
     } finally {
       setActingId(null);
     }
-  }, [session, navigate, say]);
+  }, [session, navigate, say, linkTo]);
 
   const closeForm = useCallback(() => {
     setDirty(false);
@@ -295,13 +319,50 @@ export function OnboardList(props: WidgetRuntimeProps<OnboardListConfig>) {
     setQuery({ sort: `${key},${nextDir}`, page: 0 });
   }, [query.sort, setQuery]);
 
-  const onOpen = useCallback((r: OrgWithKyc) => {
-    if (r.hasKyc && r.kycCaseId) {
-      navigate(`/kyc/reviews?case=${r.kycCaseId}`);
-    } else if (canOnboardHere) {
-      openForm();
-    }
-  }, [navigate, openForm, canOnboardHere]);
+  // ---- "Users": pick the org on this screen; the users panel (users.organization, scope "selected")
+  // shows its people. The pick lives in the URL (?org=), so the view can be linked and reloaded.
+  const pickedId = context.selection.orgId ?? null;
+  const onUsers = useCallback((r: OrgWithKyc) => {
+    context.select('orgId', r.id);
+    requestAnimationFrame(() =>
+      document.querySelector('[data-widget="users.organization"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }, [context]);
+
+  // ---- "KYC": the org's KYC case in a drawer, right here (URL state case=…, ktab=…, kedit=1)
+  const caseId = params.get('case');
+  const kycEditing = params.get('kedit') === '1';
+  const tabParam = params.get('ktab') ?? '';
+  const kycTab: TabId = (TABS.map((t) => t.id) as readonly string[]).includes(tabParam) ? (tabParam as TabId) : 'company';
+  const kycCase = useCase(port, caseId);
+  const kycView = kycCase.data;
+  const kycCmd = useCaseCommand(port);
+  const onKyc = useCallback((r: OrgWithKyc) => {
+    if (!r.kycCaseId) return;
+    kycCmd.reset();
+    patch({ case: r.kycCaseId, kedit: null, ktab: null });
+  }, [kycCmd, patch]);
+  const closeKyc = useCallback(() => {
+    kycCmd.reset();
+    patch({ case: null, kedit: null, ktab: null });
+  }, [kycCmd, patch]);
+  const decided: Record<Decision, string> = {
+    APPROVE: 'approved — the organization is now active',
+    REJECT: 'rejected',
+    REQUEST_INFO: 'returned to the applicant for more information',
+  };
+  const decideKyc = (decision: Decision, reason: string) =>
+    kycView && kycCmd.mutate({ kind: 'decide', view: kycView, decision, reason }, {
+      onSuccess: (v) => say('ok', `${v.legalName} was ${decided[decision]}.`),
+    });
+  const submitKyc = () =>
+    kycView && kycCmd.mutate({ kind: 'submit', view: kycView }, { onSuccess: (v) => say('ok', `${v.legalName} is back in the review queue.`) });
+  const saveKyc = (values: CaseFormValues) =>
+    kycView && kycCmd.mutate({ kind: 'update', view: kycView, values }, {
+      onSuccess: (v) => {
+        say('ok', `Saved changes to ${v.legalName}. Resubmit it when it’s ready for review.`);
+        patch({ kedit: null });
+      },
+    });
 
   const onNewOnboarding = useCallback(() => {
     openForm();
@@ -392,6 +453,56 @@ export function OnboardList(props: WidgetRuntimeProps<OnboardListConfig>) {
     </Drawer>
   );
 
+  const kycProblem = kycCmd.error ? toProblem(kycCmd.error) : null;
+  const kycDrawer = caseId && (
+    <Drawer
+      wide
+      title={kycView ? (kycEditing ? `Edit ${kycView.legalName}` : kycView.legalName) : 'KYC case'}
+      subtitle={kycView ? [kycView.caseNo, kycView.registrationNumber].filter(Boolean).join(' · ') : undefined}
+      onClose={closeKyc}
+    >
+      {kycCase.isPending ? (
+        <div className="p-5"><StatePanel kind="loading" title="Loading the KYC case" /></div>
+      ) : kycCase.error || !kycView ? (
+        <div className="p-5">
+          <EmptyState
+            title={kycCase.error && toProblem(kycCase.error).status === 404 ? 'Case not found' : 'Couldn’t load this case'}
+            hint={kycCase.error ? toProblem(kycCase.error).message : undefined}
+          />
+        </div>
+      ) : kycEditing && (kycView.canEdit ?? (isEditableStatus(kycView.status) && canCreate)) ? (
+        <CaseForm
+          key={`${kycView.caseId}:${kycView.version}`}
+          mode="edit"
+          initial={formFromView(kycView)}
+          master={master.data}
+          masterLoading={master.isPending}
+          busy={kycCmd.isPending}
+          problem={kycProblem}
+          onSubmit={saveKyc}
+          onCancel={() => patch({ kedit: null })}
+          onDirtyChange={() => undefined}
+        />
+      ) : (
+        <CaseDetails
+          view={kycView}
+          canReject={context.permissions.includes('kyc.reject')}
+          tab={kycTab}
+          onTab={(t) => patch({ ktab: t === 'company' ? null : t })}
+          master={master.data}
+          port={port}
+          canCreate={canCreate}
+          busy={kycCmd.isPending}
+          problem={kycProblem}
+          onEdit={() => { kycCmd.reset(); patch({ kedit: '1' }); }}
+          onSubmit={submitKyc}
+          onDecide={decideKyc}
+          onReload={() => { kycCmd.reset(); void kycCase.refetch(); }}
+        />
+      )}
+    </Drawer>
+  );
+
   const searchBox = (
     <div className="mb-4 grid gap-3">
       <label className="relative block">
@@ -465,7 +576,9 @@ export function OnboardList(props: WidgetRuntimeProps<OnboardListConfig>) {
           rows={rows}
           query={query}
           onSort={onSort}
-          onOpen={onOpen}
+          onUsers={onUsers}
+          onKyc={onKyc}
+          pickedId={pickedId}
           actAs={maySudo ? { busyId: actingId, onActAs: (r) => void actAs(r) } : undefined}
         />
       </div>
@@ -479,10 +592,11 @@ export function OnboardList(props: WidgetRuntimeProps<OnboardListConfig>) {
         onSize={(s) => setQuery({ size: s, page: 0 })}
       />
       <p className="text-dim mt-3 text-xs">
-        Click an organization to view its KYC case · “New onboarding” creates a new case
+        “Users” shows an organization’s people below · “KYC” opens its KYC case · “New onboarding” creates a new case
         {maySudo && ' · “Act as” lets you work as an organization — manage its users and roles'}
       </p>
       {formDrawer}
+      {kycDrawer}
     </Panel>
   );
 }

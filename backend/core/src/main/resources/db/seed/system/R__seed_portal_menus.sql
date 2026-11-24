@@ -244,6 +244,19 @@ VALUES ('1f04eabd-9214-d45d-c84c-71b8c3221e97', 'admin', 'PUBLISHED', '{
                                 "scope": "own"
                             },
                             "widgetId": "onboard.list"
+                        },
+                        {
+                            "id": "w608f40a844",
+                            "span": {
+                                "lg": 12,
+                                "md": 12,
+                                "sm": 8,
+                                "xs": 4
+                            },
+                            "config": {
+                                "scope": "selected"
+                            },
+                            "widgetId": "users.organization"
                         }
                     ]
                 }

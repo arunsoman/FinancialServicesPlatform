@@ -38,6 +38,7 @@ public class KycCaseService {
 
     private final KycCaseRepository caseRepository;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private final CoreClient core;
     private final KycCheckRepository checkRepository;
     private final KycUboRepository uboRepository;
     private final KycBankAccountRepository bankRepository;
@@ -48,8 +49,9 @@ public class KycCaseService {
                           KycUboRepository uboRepository, KycBankAccountRepository bankRepository,
                           KycCaseEventRepository eventRepository,
                           IdempotencyRecordRepository idempotencyRepository,
-                          org.springframework.jdbc.core.JdbcTemplate jdbc) {
+                          org.springframework.jdbc.core.JdbcTemplate jdbc, CoreClient core) {
         this.jdbc = jdbc;
+        this.core = core;
         this.caseRepository = caseRepository;
         this.checkRepository = checkRepository;
         this.uboRepository = uboRepository;
@@ -159,7 +161,7 @@ public class KycCaseService {
     }
 
     @Transactional(readOnly = true)
-    public KycDtos.CaseView get(UUID caseId, UUID ownerTenantId, UUID viewerPersonId) {
+    public KycDtos.CaseView get(UUID caseId, UUID ownerTenantId, UUID viewerPersonId, String viewerAssertion) {
         KycCase c = caseRepository.findByIdAndOwnerTenantId(caseId, ownerTenantId)
             .orElseThrow(() -> new ApiProblemException("KYC_CASE_NOT_FOUND",
                 "Case not found or not accessible", 404));
@@ -183,7 +185,7 @@ public class KycCaseService {
             blockedReason = "STATE";
         } else if (viewerPersonId != null && viewerPersonId.equals(c.makerPersonId)) {
             blockedReason = "MAKER";
-        } else if (viewerPersonId != null && !isChecker(viewerPersonId)) {
+        } else if (viewerPersonId != null && !isChecker(viewerAssertion)) {
             blockedReason = "CHECKER";
         }
         boolean canDecide = blockedReason == null;
@@ -525,9 +527,19 @@ public class KycCaseService {
                 && c.updatedAt.isBefore(Instant.now().minusSeconds(600)));
     }
 
-    /** Whether a person is a designated checker (persons.is_checker). Only checkers may decide KYC cases. */
-    public boolean isChecker(UUID personId) {
-        if (personId == null) return false;
-        return jdbc.queryForObject("SELECT is_checker FROM persons WHERE id = ?", Boolean.class, personId);
+    /**
+     * Whether the acting person is a designated checker. Core owns the flag (persons.is_checker) —
+     * the plugin never reads core tables (AGENTS §4), so it asks core as that person
+     * (GET /v1/me/permissions → "checker"). Core re-checks the flag when the decision resolves the
+     * approval, so an unreachable core here only hides the decision controls; it never grants them.
+     */
+    public boolean isChecker(String actorAssertion) {
+        if (actorAssertion == null || actorAssertion.isBlank()) return false;
+        try {
+            return Boolean.TRUE.equals(core.me(actorAssertion).get("checker"));
+        } catch (RuntimeException e) {
+            log.warn("kyc_checker_lookup_failed error={}", e.getClass().getSimpleName());
+            return false;
+        }
     }
 }

@@ -52,15 +52,29 @@ export function opLabel(op: string): string {
   return OP_LABEL[op] ?? op.replace(/_/g, ' ').toLowerCase();
 }
 
-/** Where the request's subject lives, for "open the record" links (portal-relative). */
-export function subjectLink(row: QueueRow): { to: string; label: string } | null {
+/** The widget the request's subject lives in, and the query that opens the record there. The
+ *  card resolves it to a screen of the CURRENT portal's published menus (signed-layout
+ *  widgetScreenLink) — never a hard-coded path, which would land on the portal's first screen. */
+export interface SubjectTarget {
+  /** widgets that open the record, best first — the first one this portal's menus offer wins */
+  widgetIds: string[];
+  search: string;
+  label: string;
+}
+
+export function subjectLink(row: QueueRow): SubjectTarget | null {
   const t = row.targetResourceId;
-  if (row.operationType.startsWith('PLUGIN:kyc:')) return { to: '/kyc/reviews', label: 'Decide in the KYC review queue' };
+  const q = (key: string) => (t ? `?${key}=${encodeURIComponent(t)}` : '');
+  const op = row.operationType;
+  // org portals: the KYC review queue; the admin console: the KYC drawer of its Organization list
+  if (op.startsWith('PLUGIN:kyc:')) return { widgetIds: ['kyc.manage', 'onboard.list'], search: q('case'), label: 'Open the KYC case to decide' };
   if (!t) return null;
-  if (row.operationType.startsWith('USER_')) return { to: `/users?user=${t}`, label: 'Open the user' };
-  if (row.operationType === 'ROLE_UPDATE' || row.operationType === 'ROLE_DELETE') return { to: `/rbac?role=${t}`, label: 'Open the role' };
-  if (row.operationType === 'JE_POSTING') return { to: `/journal?entry=${t}`, label: 'Open the journal entry' };
-  if (row.operationType === 'BANK_ACCOUNT_CREATE') return { to: `/bank-accounts?account=${t}`, label: 'Open the bank accounts' };
+  if (op.startsWith('USER_')) return { widgetIds: ['users.organization'], search: q('user'), label: 'Open the user' };
+  if (op === 'ROLE_UPDATE' || op === 'ROLE_DELETE') return { widgetIds: ['rbac.matrix'], search: q('role'), label: 'Open the role' };
+  if (op === 'JE_POSTING') return { widgetIds: ['journal.entry'], search: q('entry'), label: 'Open the journal entry' };
+  if (op === 'BANK_ACCOUNT_CREATE') return { widgetIds: ['bank.accounts'], search: q('account'), label: 'Open the bank accounts' };
+  if (op.startsWith('BRANCH_')) return { widgetIds: ['org.branches'], search: q('branch'), label: 'Open the branch' };
+  if (op === 'INVOICE_VOID') return { widgetIds: ['billing.invoices'], search: '', label: 'Open the invoices' };
   return null;
 }
 

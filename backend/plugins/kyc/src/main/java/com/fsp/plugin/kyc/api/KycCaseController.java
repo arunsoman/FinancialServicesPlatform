@@ -57,7 +57,7 @@ public class KycCaseController {
     public KycDtos.CaseView get(HttpServletRequest request, @PathVariable("caseId") UUID caseId) {
         var actor = ActorAssertionFilter.actor(request);
         caseService.find(caseId, actor.tenantId()).ifPresent(c -> customerService.refresh(c, actor.assertion()));
-        return caseService.get(caseId, actor.tenantId(), actor.personId());
+        return caseService.get(caseId, actor.tenantId(), actor.personId(), actor.assertion());
     }
 
     /** kyc.customer.create — POST /customers: Customer Registration (step 1 of 2). No password:
@@ -69,7 +69,7 @@ public class KycCaseController {
         var actor = ActorAssertionFilter.actor(request);
         KycCase c = customerService.onboard(actor.tenantId(), actor.personId(), actor.username(), req,
             actor.assertion(), idempotencyKey);
-        return ResponseEntity.status(HttpStatus.CREATED).body(caseService.get(c.id, actor.tenantId(), actor.personId()));
+        return ResponseEntity.status(HttpStatus.CREATED).body(caseService.get(c.id, actor.tenantId(), actor.personId(), actor.assertion()));
     }
 
     /** kyc.case.activation — POST /cases/{caseId}/activation: re-send the activation link/code. */
@@ -97,7 +97,7 @@ public class KycCaseController {
         var actor = ActorAssertionFilter.actor(request);
         KycCase c = sagaService.onboard(actor.tenantId(), actor.personId(), actor.username(), req,
             actor.assertion(), idempotencyKey);
-        return ResponseEntity.status(HttpStatus.CREATED).body(caseService.get(c.id, actor.tenantId(), actor.personId()));
+        return ResponseEntity.status(HttpStatus.CREATED).body(caseService.get(c.id, actor.tenantId(), actor.personId(), actor.assertion()));
     }
 
     /** kyc.case.update — PATCH /cases/{caseId} (DRAFT / REQUEST_INFO; expectedVersion in the body) */
@@ -108,7 +108,7 @@ public class KycCaseController {
             @RequestBody KycDtos.UpdateCaseRequest req) {
         var actor = ActorAssertionFilter.actor(request);
         KycCase c = caseService.update(caseId, actor.tenantId(), req, idempotencyKey, actor.personId());
-        return caseService.get(c.id, actor.tenantId(), actor.personId());
+        return caseService.get(c.id, actor.tenantId(), actor.personId(), actor.assertion());
     }
 
     /** kyc.case.submit — POST /cases/{caseId}/submit: resume the saga (DRAFT/REQUEST_INFO →
@@ -121,7 +121,7 @@ public class KycCaseController {
         var actor = ActorAssertionFilter.actor(request);
         KycCase c = sagaService.resume(caseId, actor.tenantId(), actor.personId(), actor.username(),
             actor.assertion(), idempotencyKey);
-        return caseService.get(c.id, actor.tenantId(), actor.personId());
+        return caseService.get(c.id, actor.tenantId(), actor.personId(), actor.assertion());
     }
 
     /** kyc.case.decide — POST /cases/{caseId}/decisions */
@@ -132,6 +132,6 @@ public class KycCaseController {
         var actor = ActorAssertionFilter.actor(request);
         KycCase c = decisionService.decide(caseId, actor.tenantId(), actor.personId(), body,
             actor.assertion(), null, body.expectedVersion());
-        return caseService.get(c.id, actor.tenantId(), actor.personId());
+        return caseService.get(c.id, actor.tenantId(), actor.personId(), actor.assertion());
     }
 }

@@ -138,6 +138,35 @@ export function signedSpan(def: WidgetDef, placed: SignedPlaced, tier: Tier): nu
   return Math.max(z0.min, Math.min(z0.max, s));
 }
 
+/**
+ * Where this person can open a widget in THIS portal: the first screen that places it and whose
+ * ACTIVE cell they hold. Null when the portal's published menus don't offer it to them — callers
+ * then show no link rather than a path that lands somewhere else.
+ */
+export function widgetScreenLink(layout: SignedLayout, widgetId: string, access: MenuAccess): string | null {
+  if (!layout.widgets.some((w) => w.id === widgetId)) return null;
+  for (const m of layout.menus) {
+    for (const s of m.screens) {
+      if (s.placedWidgets.some((p) => p.widgetId === widgetId) && holdsCell(access, m.id, s.id, 'ACTIVE')) return screenLink(m, s);
+    }
+  }
+  return null;
+}
+
+/**
+ * Hook form of {@link widgetScreenLink} for widgets that link to another widget's screen:
+ * `link('kyc.manage', '?case=…')` → the portal-relative path, or null when this portal's
+ * menus don't offer that widget to this person (show no link / say so — never guess a path).
+ */
+export function useWidgetLink(): (widgetId: string, search?: string) => string | null {
+  const layout = useSignedLayout();
+  const access = useMenuAccess();
+  return (widgetId, search = '') => {
+    const screen = layout ? widgetScreenLink(layout, widgetId, access) : null;
+    return screen ? `${screen}${search}` : null;
+  };
+}
+
 /** First screen the user can see (the portal's home when a layout is published). */
 export function firstVisibleLink(
   layout: SignedLayout,

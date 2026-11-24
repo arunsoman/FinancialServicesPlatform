@@ -253,7 +253,7 @@ function list(req: FixtureRequest): Page<ReturnType<typeof summary>> {
       (!status.length || status.includes(r.status)) &&
       (!risk.length || (r.riskRating !== null && risk.includes(r.riskRating))) &&
       (!needle ||
-        [r.legalName, r.dbaName ?? '', r.registrationNumber, r.taxId, r.caseNo].some((f) => f.toLowerCase().includes(needle))),
+        [r.legalName, r.dbaName ?? '', r.registrationNumber ?? '', r.taxId, r.caseNo].some((f) => f.toLowerCase().includes(needle))),
   );
   const key = SORT_EXPR[sk as SortKey];
   const dir = sd === 'asc' ? 1 : -1;

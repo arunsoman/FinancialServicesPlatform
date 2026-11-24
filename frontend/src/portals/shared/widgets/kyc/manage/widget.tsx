@@ -239,7 +239,7 @@ export function KycManage() {
         <Drawer
           wide
           title={openId === 'new' ? 'New KYC application' : editing ? `Edit ${view?.legalName ?? 'application'}` : view?.legalName ?? 'KYC case'}
-          subtitle={openId === 'new' ? 'Onboard an organization' : view ? `${view.caseNo} · ${view.registrationNumber}` : undefined}
+          subtitle={openId === 'new' ? 'Onboard an organization' : view ? [view.caseNo, view.registrationNumber].filter(Boolean).join(' · ') : undefined}
           onClose={requestClose}
           banner={
             confirmDiscard ? (

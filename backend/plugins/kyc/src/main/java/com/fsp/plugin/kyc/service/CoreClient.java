@@ -101,6 +101,11 @@ public class CoreClient {
         return object(call(HttpMethod.GET, "/v1/tenants/" + tenantId, null, actorAssertion, null));
     }
 
+    /** GET /v1/me/permissions as the acting person (DELEGATED): their keys and the checker flag. */
+    public Map<String, Object> me(String actorAssertion) {
+        return object(call(HttpMethod.GET, "/v1/me/permissions", null, actorAssertion, null));
+    }
+
     /** Installations of this plugin awaiting readiness (MACHINE). */
     public List<Map<String, Object>> provisioning(String pluginCode) {
         JsonNode n = call(HttpMethod.GET, "/v1/plugins/" + pluginCode + "/installations/provisioning", null, null, null);

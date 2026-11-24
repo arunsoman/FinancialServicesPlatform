@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
 import { Alert, Button, Chip, KvPair } from '../../../ui/atoms';
+import { useWidgetLink } from '../../../../signed/signed-layout';
 import { ApprovalDecision } from './ApprovalDecision';
 import { blockedText, opLabel, proposalLines, subjectLink } from './model';
 import type { QueueRow } from './model';
@@ -39,7 +40,11 @@ export function ApprovalCard({ row, busy, problem, onDecide, onResetProblem }: A
   const status = STATUS[row.status];
   const lines = proposalLines(row.payload);
   const blocked = blockedText(row);
-  const link = subjectLink(row);
+  const target = subjectLink(row);
+  const linkTo = useWidgetLink();
+  // resolved in THIS portal's published menus; no screen for it here → no link (never a wrong page)
+  const to = target ? target.widgetIds.map((w) => linkTo(w, target.search)).find((t) => t !== null) ?? null : null;
+  const link = target && to ? { to, label: target.label } : null;
 
   return (
     <li data-approval-id={row.id} className="rounded-2xl border border-line bg-panel p-4">

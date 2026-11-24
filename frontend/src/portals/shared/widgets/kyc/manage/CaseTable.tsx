@@ -13,7 +13,7 @@ export interface CaseTableProps {
   onOpen: (row: CaseSummary) => void;
 }
 
-const SUB_LABEL: Record<CaseSummary['subType'], string> = {
+const SUB_LABEL: Record<NonNullable<CaseSummary['subType']>, string> = {
   MANUFACTURER: 'Manufacturer', DISTRIBUTOR: 'Distributor', DEALER: 'Dealer', WHOLESALER: 'Wholesaler', MERCHANT: 'Merchant',
 };
 
@@ -32,7 +32,7 @@ function Org({ row }: { row: CaseSummary }) {
     <span className="block min-w-0">
       <span className="block truncate font-semibold">{row.legalName}</span>
       <span className="text-dim block truncate text-[12px]">
-        <span className="mono">{row.caseNo}</span> · {SUB_LABEL[row.subType]}
+        <span className="mono">{row.caseNo}</span> · {row.subType ? SUB_LABEL[row.subType] : 'Customer'}
         {row.dbaName ? ` · t/a ${row.dbaName}` : ''}
       </span>
     </span>

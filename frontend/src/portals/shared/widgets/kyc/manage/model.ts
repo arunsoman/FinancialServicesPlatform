@@ -49,8 +49,10 @@ export interface CaseSummary {
   subjectTenantId: string | null;
   legalName: string;
   dbaName: string | null;
-  subType: SubType;
-  registrationNumber: string;
+  /** null for a CUSTOMER case (a person, not an organization) */
+  subType: SubType | null;
+  /** null for a CUSTOMER case */
+  registrationNumber: string | null;
   status: CaseStatus;
   riskRating: Risk | null;
   submittedAt: string | null;
@@ -550,8 +552,8 @@ export function emptyForm(): CaseFormValues {
 
 export function formFromView(v: CaseView): CaseFormValues {
   return {
-    subType: v.subType, legalName: v.legalName, dbaName: v.dbaName ?? '', entityType: v.entityType,
-    registrationNumber: v.registrationNumber, incorporationDate: v.incorporationDate, taxId: v.taxId,
+    subType: v.subType ?? '', legalName: v.legalName, dbaName: v.dbaName ?? '', entityType: v.entityType,
+    registrationNumber: v.registrationNumber ?? '', incorporationDate: v.incorporationDate, taxId: v.taxId,
     mccCode: v.mccCode, websiteUrl: v.websiteUrl ?? '',
     expectedMonthlyVolume: minorToMajor(v.expectedMonthlyVolume), avgTicketSize: minorToMajor(v.avgTicketSize),
     registeredAddress: v.registeredAddress, registeredCity: v.registeredCity, registeredRegion: v.registeredRegion,
