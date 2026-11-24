@@ -14,6 +14,13 @@ export const PERMISSION_CATALOGUE = [
   'gl.account.create',
   'gl.account.view',
   'idp.manage',
+  // invoicing (billing.invoices) — V40 + V41; invoice.void.approve decides a void in the approvals queue
+  'invoice.collect',
+  'invoice.create',
+  'invoice.pay',
+  'invoice.view',
+  'invoice.void',
+  'invoice.void.approve',
   'je.approve',
   'je.create',
   'je.view',

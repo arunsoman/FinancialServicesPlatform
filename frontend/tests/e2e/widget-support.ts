@@ -120,24 +120,46 @@ export async function portalSession(browser: Browser, stage: StageFile): Promise
   return signIn(browser, `widget e2e (${user})`, portal, user, pass);
 }
 
-const glob = (apiPath: string) => `**${apiPath.replace(/\{\w+\}/g, '*')}**`;
+/** `/api/tenants/{tenantId}/invoices/{invoiceId}` → a regex with one named group per `{param}`. */
+function pathMatcher(apiPath: string): RegExp {
+  const parts = apiPath.split(/\{(\w+)\}/);
+  const src = parts.map((p, i) => (i % 2 ? `(?<${p}>[^/]+)` : p.replace(/[.*+?^$()|[\]\\]/g, '\\$&'))).join('');
+  return new RegExp(`^${src}$`);
+}
 
 /**
  * Stage 1: answer every operation still marked NEW from the widget's `default` fixture so the
- * real screen renders before the backend exists. A no-op when FSP_WIDGET_LIVE=1 (stage 2).
+ * real screen renders before the backend exists. A resolver fixture PLAYS the server, exactly as
+ * in the workbench: it gets the path + query params, the body and `permissions`, and an error it
+ * throws (ApiError) becomes that HTTP status. When several NEW paths match a URL the most literal
+ * wins (`/invoices/summary` before `/invoices/{invoiceId}`). A no-op when FSP_WIDGET_LIVE=1.
  */
-export async function stubPlannedOps(page: Page, stage: StageFile, fixtures: Record<string, Partial<Record<string, unknown>>>): Promise<string[]> {
+export async function stubPlannedOps(
+  page: Page, stage: StageFile, fixtures: Record<string, Partial<Record<string, unknown>>>, permissions: readonly string[] = [],
+): Promise<string[]> {
   if (LIVE) return [];
-  const stubbed: string[] = [];
-  for (const op of stage.ops.filter((o) => o.status === 'NEW')) {
+  const ops = stage.ops.filter((o) => o.status === 'NEW').map((o) => ({ ...o, rx: pathMatcher(o.path), params: (o.path.match(/\{/g) ?? []).length }));
+  if (!ops.length) return [];
+  await page.route((url) => ops.some((o) => o.rx.test(url.pathname)), async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const op = ops.filter((o) => o.method === req.method() && o.rx.test(url.pathname)).sort((a, b) => a.params - b.params)[0];
+    if (!op) return route.fallback();
     const answer = fixtures[op.name]?.['default'];
-    await page.route(glob(op.path), async (route) => {
-      if (route.request().method() !== op.method) return route.fallback();
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(answer ?? {}) });
-    });
-    stubbed.push(`${op.method} ${op.path}`);
-  }
-  return stubbed;
+    try {
+      const params = { ...Object.fromEntries(url.searchParams), ...(op.rx.exec(url.pathname)?.groups ?? {}) };
+      const body = req.postData() ? JSON.parse(req.postData() as string) : {};
+      const value = typeof answer === 'function' ? answer({ params, body, permissions, scenario: 'default' }) : answer;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(value ?? {}) });
+    } catch (e) {
+      const err = e as { status?: number; code?: string; message?: string; detail?: string };
+      await route.fulfill({
+        status: err.status ?? 500, contentType: 'application/problem+json',
+        body: JSON.stringify({ code: err.code ?? 'FIXTURE_ERROR', title: err.code ?? 'Error', detail: err.detail ?? err.message ?? 'fixture error' }),
+      });
+    }
+  });
+  return ops.map((o) => `${o.method} ${o.path}`);
 }
 
 /** Opens the portal route that mounts the widget (stage file screen.screenPath). */

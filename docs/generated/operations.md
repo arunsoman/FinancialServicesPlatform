@@ -10,6 +10,16 @@
 | audit.list | —(owner-scoped) | — | `AuditController.java` |
 | bank.account.create | bank.account.create | FOUR_EYES | `BankAccountController.java` |
 | bank.account.list | bank.account.view | READ | `BankAccountController.java` |
+| billing.invoices.confirm | invoice.collect | — | `InvoiceController.java` |
+| billing.invoices.counterparties | invoice.create | — | `InvoiceController.java` |
+| billing.invoices.create | invoice.create | — | `InvoiceController.java` |
+| billing.invoices.get | invoice.view | — | `InvoiceController.java` |
+| billing.invoices.issue | invoice.create | — | `InvoiceController.java` |
+| billing.invoices.list | invoice.view | — | `InvoiceController.java` |
+| billing.invoices.options | invoice.pay | — | `InvoiceController.java` |
+| billing.invoices.pay | invoice.pay | — | `InvoiceController.java` |
+| billing.invoices.summary | invoice.view | — | `InvoiceController.java` |
+| billing.invoices.void | invoice.void | — | `InvoiceController.java` |
 | customer.create | —(owner-scoped) | — | `CustomerController.java` |
 | customer.get | —(owner-scoped) | — | `CustomerController.java` |
 | customer.verification.record | —(owner-scoped) | — | `CustomerController.java` |
@@ -112,6 +122,7 @@
 | Operation id | Permission | Risk | Source |
 |---|---|---|---|
 | emi.wallet.open | —(owner-scoped) | WRITE | `WalletController.java` |
+| emi.wallet.mine | —(owner-scoped) | — | `WalletController.java` |
 | emi.wallet.view | —(owner-scoped) | — | `WalletController.java` |
 | emi.wallet.redeem | —(owner-scoped) | WRITE | `WalletController.java` |
 | emi.bill.pay | —(owner-scoped) | WRITE | `WalletController.java` |

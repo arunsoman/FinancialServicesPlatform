@@ -35,6 +35,8 @@ timeline
     V37 : auth channel width
     V38 : notification snooze resolve
     V39 : branch maintenance
+    V40 : invoice permissions
+    V41 : invoices
 
-**Next free migration number: V40.**
+**Next free migration number: V42.**
 ```

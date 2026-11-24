@@ -44,6 +44,8 @@ public final class RoleTemplates {
         "inventory.view", "inventory.sku.manage", "inventory.stock.upload",
         "digital.view", "digital.product.manage", "digital.voucher.upload", "digital.float.deposit", "digital.dispense",
         "je.post.immediate",
+        // invoicing (V40): an org bills its buyers and pays its suppliers
+        "invoice.view", "invoice.create", "invoice.pay", "invoice.collect", "invoice.void", "invoice.void.approve",
         "kyc.review", "user.manage", "role.view", "role.manage");
 
     private static final List<String> ADMIN_ONBOARDING = List.of(
@@ -54,6 +56,7 @@ public final class RoleTemplates {
         "notification.view",
         "inventory.view", "inventory.pricing.approve", "inventory.stock.approve",
         "digital.view", "digital.voucher.authorize",
+        "invoice.view", "invoice.void.approve",
         "kyc.review", "kyc.approve", "kyc.reject", "user.manage", "role.view", "role.manage");
 
     /** Non-leaf orgs hold the plugin-consent checker key — see V20__psp_plugin_consent.sql. */

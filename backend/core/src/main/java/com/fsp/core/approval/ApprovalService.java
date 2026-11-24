@@ -218,6 +218,7 @@ public class ApprovalService {
                  ApprovalRequest.OpType.BRANCH_UPDATE,
                  ApprovalRequest.OpType.BRANCH_DELETE -> "role.manage";
             case ApprovalRequest.OpType.BANK_ACCOUNT_CREATE -> "bank.account.approve";
+            case ApprovalRequest.OpType.INVOICE_VOID -> "invoice.void.approve";
             default -> "user.manage";
         };
         permissions.require(checker, perm, row.tenantId);
@@ -242,6 +243,7 @@ public class ApprovalService {
                  ApprovalRequest.OpType.BRANCH_CREATE, ApprovalRequest.OpType.BRANCH_UPDATE,
                  ApprovalRequest.OpType.BRANCH_DELETE -> "role.manage";
             case ApprovalRequest.OpType.BANK_ACCOUNT_CREATE -> "bank.account.approve";
+            case ApprovalRequest.OpType.INVOICE_VOID -> "invoice.void.approve";
             default -> "user.manage";
         };
     }
@@ -350,7 +352,7 @@ public class ApprovalService {
     /** Every permission that lets someone decide SOME approval type — any one opens the queue. */
     static final List<String> CHECKER_PERMISSIONS = List.of(
         "kyc.approve", "kyc.reject", "kyc.review", "je.approve", "ui.layout.manage",
-        "user.manage", "role.manage", "plugin.manage");
+        "user.manage", "role.manage", "plugin.manage", "invoice.void.approve");
 
     public List<ApprovalDtos.QueueView> queue(UUID tenantId, List<String> statuses,
                                               String operationType, Actor actor) {
@@ -450,6 +452,7 @@ public class ApprovalService {
             case ApprovalRequest.OpType.BRANCH_UPDATE -> ApprovalRequest.OpType.BRANCH_UPDATE;
             case ApprovalRequest.OpType.BRANCH_DELETE -> ApprovalRequest.OpType.BRANCH_DELETE;
             case ApprovalRequest.OpType.BANK_ACCOUNT_CREATE -> ApprovalRequest.OpType.BANK_ACCOUNT_CREATE;
+            case ApprovalRequest.OpType.INVOICE_VOID -> ApprovalRequest.OpType.INVOICE_VOID;
             default -> ApprovalRequest.OpType.GENERIC;
         };
     }

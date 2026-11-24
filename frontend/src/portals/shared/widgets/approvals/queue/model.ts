@@ -37,6 +37,7 @@ const OP_LABEL: Record<string, string> = {
   ROLE_DELETE: 'Delete role',
   JE_POSTING: 'Journal entry posting',
   BANK_ACCOUNT_CREATE: 'New settlement bank account',
+  INVOICE_VOID: 'Void an issued invoice',
   KYC_TENANT_ACTIVATION: 'Organization activation',
   PLUGIN_REGISTER: 'Plugin registration',
   PLUGIN_INSTALL: 'Plugin installation',

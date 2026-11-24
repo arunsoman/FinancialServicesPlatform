@@ -41,6 +41,8 @@ public class ApprovalRequest {
         public static final String BRANCH_DELETE = "BRANCH_DELETE";
         /** Settlement bank account filing (F-10); checker needs bank.account.approve. */
         public static final String BANK_ACCOUNT_CREATE = "BANK_ACCOUNT_CREATE";
+        /** Voiding an ISSUED invoice (billing); checker needs invoice.void.approve. */
+        public static final String INVOICE_VOID = "INVOICE_VOID";
         /** Plugin platform op types pass through via the PLUGIN: prefix (canonicalOpType). */
         public static final String PLUGIN_REGISTER = "PLUGIN_REGISTER";
         public static final String PLUGIN_INSTALL = "PLUGIN_INSTALL";

@@ -72,6 +72,20 @@ public class EmiMoneyClient {
             buyerPersonId, tenantId, username, null);
     }
 
+    /**
+     * The acting person's own NAD wallet ({id, balance, status, …}); empty when they have none.
+     * Any other EMI refusal or a transport failure propagates — callers decide how to degrade.
+     */
+    public java.util.Optional<JsonNode> myWallet(UUID personId, UUID tenantId, String username) {
+        try {
+            return java.util.Optional.ofNullable(call(HttpMethod.GET, "/v1/emi/wallets/mine",
+                personId, tenantId, username, null));
+        } catch (ApiException e) {
+            if (e.getStatus() == HttpStatus.NOT_FOUND) return java.util.Optional.empty();
+            throw e;
+        }
+    }
+
     // ------------------------------------------------------------------ plumbing
 
     private JsonNode call(HttpMethod method, String path, UUID personId, UUID tenantId,

@@ -1,5 +1,5 @@
 {
-  "digest": "ca510def8b6171729fcd0ad7737c266cc72e506006b37cf6267b40f5f578f245",
+  "digest": "38b705f94c62cc625bc7be7a4a35c5d6902e35aec0a3412117f097fb1e271264",
   "endpoints": [
     {
       "id": "approval.queue.read",
@@ -608,6 +608,86 @@
       "permission": "",
       "risk": "READ",
       "title": "List an organization's departments"
+    },
+    {
+      "id": "billing.invoices.list",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices",
+      "permission": "invoice.view",
+      "risk": "READ",
+      "title": "List an organization's sales or purchase invoices"
+    },
+    {
+      "id": "billing.invoices.create",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices",
+      "permission": "invoice.create",
+      "risk": "WRITE",
+      "title": "Draft an invoice"
+    },
+    {
+      "id": "billing.invoices.get",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}",
+      "permission": "invoice.view",
+      "risk": "READ",
+      "title": "View an invoice"
+    },
+    {
+      "id": "billing.invoices.issue",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/issue",
+      "permission": "invoice.create",
+      "risk": "WRITE",
+      "title": "Issue a draft invoice to the buyer"
+    },
+    {
+      "id": "billing.invoices.options",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/payment-options",
+      "permission": "invoice.pay",
+      "risk": "READ",
+      "title": "Ways the buyer can pay an invoice"
+    },
+    {
+      "id": "billing.invoices.pay",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/payments",
+      "permission": "invoice.pay",
+      "risk": "WRITE",
+      "title": "Pay a received invoice (wallet or bank transfer)"
+    },
+    {
+      "id": "billing.invoices.confirm",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/payments/{paymentId}/confirm",
+      "permission": "invoice.collect",
+      "risk": "WRITE",
+      "title": "Confirm a bank transfer for an invoice arrived"
+    },
+    {
+      "id": "billing.invoices.void",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/void",
+      "permission": "invoice.void",
+      "risk": "FOUR_EYES",
+      "title": "Void an invoice (issued invoices need a second person)"
+    },
+    {
+      "id": "billing.invoices.counterparties",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/counterparties",
+      "permission": "invoice.create",
+      "risk": "READ",
+      "title": "Organizations this one may invoice"
+    },
+    {
+      "id": "billing.invoices.summary",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/summary",
+      "permission": "invoice.view",
+      "risk": "READ",
+      "title": "Totals of an organization's open invoices"
     },
     {
       "id": "journal.entry.search",

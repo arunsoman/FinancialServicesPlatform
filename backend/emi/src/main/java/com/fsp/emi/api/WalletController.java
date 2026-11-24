@@ -81,6 +81,20 @@ public class WalletController {
         return walletView(w);
     }
 
+    /**
+     * The acting person's own NAD wallet (one per person and currency). Lets core offer
+     * "pay from your wallet" without the browser ever holding a wallet id; 404 when the
+     * person has none — the same answer a foreign wallet gets (existence never leaks).
+     */
+    @EmiOperation(id = "emi.wallet.mine", title = "View own wallet (by owner)")
+    @GetMapping(value = "/v1/emi/wallets/mine", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> myWallet(HttpServletRequest http) {
+        EmiActor actor = actor(http);
+        Wallet w = wallets.findByPersonIdAndCurrency(actor.personId(), "NAD")
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "EMI_WALLET_NOT_FOUND", "wallet not found"));
+        return walletView(w);
+    }
+
     @EmiOperation(id = "emi.wallet.view", title = "View own wallet balance")
     @GetMapping(value = "/v1/emi/wallets/{walletId}", produces = MediaType.APPLICATION_JSON_VALUE)
     public Map<String, Object> wallet(HttpServletRequest http, @PathVariable UUID walletId) {

@@ -39,6 +39,15 @@ class RoleTemplatesTest {
     }
 
     @Test
+    void everyOrgBillsAndPaysAndItsCheckerSeesInvoices() {
+        for (String subType : new String[] {"MANUFACTURER", "DISTRIBUTOR", "WHOLESALER", "MERCHANT"}) {
+            assertThat(RoleTemplates.adminKeys(subType))
+                .contains("invoice.view", "invoice.create", "invoice.pay", "invoice.collect", "invoice.void", "invoice.void.approve");
+            assertThat(RoleTemplates.checkerKeys(subType, true)).contains("invoice.view", "invoice.void.approve");
+        }
+    }
+
+    @Test
     void makerTemplateCarriesNoCheckerOnlyKeys() {
         assertThat(RoleTemplates.adminKeys("DISTRIBUTOR"))
             .doesNotContain("je.approve", "kyc.approve", "gl.account.approve", "bank.account.approve");
