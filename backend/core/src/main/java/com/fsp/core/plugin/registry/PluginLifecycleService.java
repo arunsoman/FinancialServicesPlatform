@@ -45,23 +45,29 @@ public class PluginLifecycleService {
 
     public record DesiredPlugin(String code, String version, String baseUrl, JsonNode manifest) {}
 
-    /** action: in_sync | registered | updated | held_suspended | suspended_not_shipped */
-    public record Outcome(String code, String version, String action, String detail) {}
+    /** action: in_sync | registered | updated | held_suspended | suspended_not_shipped;
+     *  installation (easy install): installed | provisioning | active | held_* | "" (not shipped / held). */
+    public record Outcome(String code, String version, String action, String detail, String installation) {
+        public Outcome(String code, String version, String action, String detail) { this(code, version, action, detail, ""); }
+    }
 
     private final PluginTypeRepository types;
     private final PluginRegistryService registry;
     private final ApprovalService approvals;
     private final AuditService audit;
     private final OutboxService outbox;
+    private final com.fsp.core.plugin.installation.PluginAutoInstaller installer;
 
     public PluginLifecycleService(PluginTypeRepository types, PluginRegistryService registry,
                                   @org.springframework.context.annotation.Lazy ApprovalService approvals,
-                                  AuditService audit, OutboxService outbox) {
+                                  AuditService audit, OutboxService outbox,
+                                  com.fsp.core.plugin.installation.PluginAutoInstaller installer) {
         this.types = types;
         this.registry = registry;
         this.approvals = approvals;
         this.audit = audit;
         this.outbox = outbox;
+        this.installer = installer;
     }
 
     // ------------------------------------------------------------------ release (ships as code)
@@ -81,7 +87,13 @@ public class PluginLifecycleService {
         for (DesiredPlugin d : desired) {
             validate(d);
             shipped.add(d.code());
-            out.add(reconcileOne(release, prov, d));
+            Outcome o = reconcileOne(release, prov, d);
+            if (!"held_suspended".equals(o.action())) {
+                // EASY INSTALL (AGENTS.md §2.1): shipping a plugin registers AND installs it — one step
+                String inst = installer.ensureOnPlatformRoot(d.code(), d.version(), null, "release " + release);
+                o = new Outcome(o.code(), o.version(), o.action(), o.detail(), inst);
+            }
+            out.add(o);
         }
         if (suspendMissing) {
             for (PluginType t : types.findByStatus("REGISTERED")) {

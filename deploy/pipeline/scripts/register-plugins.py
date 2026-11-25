@@ -107,7 +107,8 @@ def main() -> int:
                                   f"author {prov['author']}" if prov.get("author") else "",
                                   ("reviewed/approved by " + ", ".join(second_people(prov))) if second_people(prov) else ""]))
     for o in res.get("plugins", []):
-        say(f"  {o['code']} {o['version']}: {o['action']}" + (f" — {o['detail']}" if o.get("detail") and o["action"] != "registered" else ""))
+        say(f"  {o['code']} {o['version']}: {o['action']}" + (f" — {o['detail']}" if o.get("detail") and o["action"] != "registered" else "")
+            + (f" · installation: {o['installation']}" if o.get("installation") else ""))
     say(f"  recorded as release {release}" + (f" ({who})" if who else "") + "; the gateway routes changes within 60 s")
     return 0
 

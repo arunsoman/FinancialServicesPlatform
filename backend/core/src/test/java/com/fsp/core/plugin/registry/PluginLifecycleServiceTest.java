@@ -23,6 +23,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.isNull;
 
 /**
  * Plugins ship as code (docs/plugin-registration.md): a release registers what it ships, names the
@@ -34,8 +35,10 @@ class PluginLifecycleServiceTest {
     private final PluginTypeRepository types = mock(PluginTypeRepository.class);
     private final PluginRegistryService registry = mock(PluginRegistryService.class);
     private final ApprovalService approvals = mock(ApprovalService.class);
+    private final com.fsp.core.plugin.installation.PluginAutoInstaller installer =
+        mock(com.fsp.core.plugin.installation.PluginAutoInstaller.class);
     private final PluginLifecycleService service = new PluginLifecycleService(types, registry, approvals,
-        mock(AuditService.class), mock(OutboxService.class));
+        mock(AuditService.class), mock(OutboxService.class), installer);
     private final List<PluginType> saved = new ArrayList<>();
 
     PluginLifecycleServiceTest() {
@@ -71,6 +74,38 @@ class PluginLifecycleServiceTest {
         assertEquals("stage-2026.11.25-9", t.releaseRef);
         assertEquals(prov().toString(), t.provenance);
         verify(registry).provisionMachineClient(t, PluginLifecycleService.PLATFORM_ROOT, null);
+    }
+
+    // ---- easy install (AGENTS.md §2.1): shipping a plugin registers AND installs it, one step
+
+    @Test
+    void aShippedPluginIsInstalledOnThePlatformRootInTheSameStep() throws Exception {
+        when(types.findByCode("kyc")).thenReturn(List.of());
+        when(installer.ensureOnPlatformRoot(eq("kyc"), eq("1.1.0"), isNull(), any())).thenReturn("installed");
+        var out = service.reconcileRelease("stage-5", prov(), List.of(desired("1.1.0", manifest("1.1.0", "a"))), false);
+        assertEquals("registered", out.get(0).action());
+        assertEquals("installed", out.get(0).installation());
+        verify(approvals, never()).open(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void anAlreadyRegisteredPluginThatWasNeverInstalledGetsInstalledByTheNextDeploy() throws Exception {
+        // staging 2026-11-25: kyc was in_sync but installed nowhere — Customers said "not ready" forever
+        JsonNode m = manifest("1.1.0", "a");
+        when(types.findByCode("kyc")).thenReturn(List.of(row("1.1.0", "REGISTERED", m)));
+        when(installer.ensureOnPlatformRoot(eq("kyc"), eq("1.1.0"), isNull(), any())).thenReturn("installed");
+        var out = service.reconcileRelease("stage-6", prov(), List.of(desired("1.1.0", m)), false);
+        assertEquals("in_sync", out.get(0).action());
+        assertEquals("installed", out.get(0).installation());
+    }
+
+    @Test
+    void aPersonSuspendedPluginIsNotInstalledByADeploy() throws Exception {
+        PluginType susp = row("1.1.0", "SUSPENDED", manifest("1.1.0", "a"));
+        susp.suspendedReason = "PERSON";
+        when(types.findByCode("kyc")).thenReturn(List.of(susp));
+        service.reconcileRelease("stage-7", prov(), List.of(desired("1.1.0", manifest("1.1.0", "a"))), false);
+        verify(installer, never()).ensureOnPlatformRoot(any(), any(), any(), any());
     }
 
     @Test

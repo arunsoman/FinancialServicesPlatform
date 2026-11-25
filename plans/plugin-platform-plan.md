@@ -307,6 +307,8 @@ not equal to the request it is serving. It MUST NOT store or log the assertion.
 ## 5. Plugin identity, registration, installation, readiness
 
 ### 5.1 Registration (once per plugin type + version) — four-eyes
+
+> **Superseded 2026-11-25 — EASY INSTALL (AGENTS.md §2.1):** registration and installation are ONE step with NO four-eyes; a release registers and installs on the platform root at once. Only suspend / resume stay four-eyes.
 1. Plugin vendor supplies a **manifest** (§5.2) + two public JWKs (client-auth key, DPoP key) +
    its base URL.
 2. Platform admin (`plugin.register`, FOUR_EYES) submits `POST /v1/platform/plugins` → core stores
@@ -364,6 +366,8 @@ closed lists core publishes (§5.2.4) — anything else fails registration.
 | `user.list` (read) | |
 
 ### 5.3 Installation (per tenant) — four-eyes
+
+> **Superseded 2026-11-25 — EASY INSTALL (AGENTS.md §2.1):** registration and installation are ONE step with NO four-eyes; a release registers and installs on the platform root at once. Only suspend / resume stay four-eyes.
 State machine: `PENDING_APPROVAL → PROVISIONING → ACTIVE ⇄ SUSPENDED → DEACTIVATED` (never deleted).
 - Install: `POST /v1/tenants/{tenantId}/plugins` `{code, version, config}` by a person with
   `plugin.install` at that tenant or an ancestor (manifest `minAncestorRoleToInstall`) → approval
@@ -425,6 +429,8 @@ per request only).
 ---
 
 ## 7. Four-eyes for plugin actions
+
+> **Superseded 2026-11-25 — EASY INSTALL (AGENTS.md §2.1):** registration and installation are ONE step with NO four-eyes; a release registers and installs on the platform root at once. Only suspend / resume stay four-eyes.
 
 ### 7.1 Generic plugin approvals in core
 New core op type family: any `operationType` string with the `PLUGIN:` prefix, e.g.

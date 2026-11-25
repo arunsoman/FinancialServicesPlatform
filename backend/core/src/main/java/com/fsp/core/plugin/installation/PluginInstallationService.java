@@ -1,7 +1,5 @@
 package com.fsp.core.plugin.installation;
 
-import com.fsp.core.approval.ApprovalService;
-import com.fsp.core.approval.ApprovalRequest;
 import com.fsp.core.audit.AuditService;
 import com.fsp.core.common.Actor;
 import com.fsp.core.common.ApiException;
@@ -24,8 +22,10 @@ import java.util.UUID;
 
 /**
  * Plugin installation + effective-installation rule (§5.4):
- *  - Install: four-eyes gated, stores PENDING_APPROVAL + opens PLUGIN_INSTALL approval
- *  - Approve: PROVISIONING → plugin provisions → calls ready → ACTIVE when all gates ACTIVE
+ *  - Install: ONE STEP (AGENTS.md §2.1 easy install) — no four-eyes; the installation goes
+ *    straight to PROVISIONING (PluginAutoInstaller). Registration installs on the platform root
+ *    by itself, so a manual install is only needed for a narrower tenant.
+ *  - Provisioning: the plugin reports its gates → ACTIVE when all gates are ACTIVE (~30 s)
  *  - Effective installation: walk hierarchy_path from target tenant up to root; first
  *    matching installation decides (DIRECT / inheritance policy / PROHIBITED override).
  */
@@ -38,7 +38,7 @@ public class PluginInstallationService {
     private final PluginOptChoiceRepository optChoices;
     private final PluginTypeRepository types;
     private final TenantRepository tenants;
-    private final ApprovalService approvals;
+    private final PluginAutoInstaller installer;
     private final AuditService audit;
     private final OutboxService outbox;
 
@@ -46,62 +46,41 @@ public class PluginInstallationService {
                                      PluginInstallationGateRepository gates,
                                      PluginOptChoiceRepository optChoices,
                                      PluginTypeRepository types, TenantRepository tenants,
-                                     ApprovalService approvals, AuditService audit,
+                                     PluginAutoInstaller installer, AuditService audit,
                                      OutboxService outbox) {
         this.installations = installations;
         this.gates = gates;
         this.optChoices = optChoices;
         this.types = types;
         this.tenants = tenants;
-        this.approvals = approvals;
+        this.installer = installer;
         this.audit = audit;
         this.outbox = outbox;
     }
 
-    /** Submit installation for a tenant (maker = caller). Four-eyes: stored PENDING_APPROVAL
-     *  and a PLUGIN_INSTALL approval is opened. */
+    /** Install a plugin on a tenant — one step, no approval: straight to PROVISIONING. */
     @Transactional
     public PluginInstallation install(UUID tenantId, String pluginCode, String pluginVersion,
                                       String config, Actor actor) {
-        // Verify the type is REGISTERED
         var registered = types.findByCodeAndStatus(pluginCode, "REGISTERED");
         if (registered.isEmpty()) {
             throw ApiException.badRequest("PLUGIN_TYPE_NOT_REGISTERED",
-                "Plugin type %s is not REGISTERED (registration must be approved first)".formatted(pluginCode));
+                "Plugin type %s is not registered".formatted(pluginCode));
         }
         PluginType type = registered.get(0);
-
-        // No duplicate ACTIVE installation
-        var existing = installations.findByPluginCodeAndTenantIdAndStatus(pluginCode, tenantId, "ACTIVE");
-        if (!existing.isEmpty()) {
-            throw ApiException.conflict("PLUGIN_INSTALLATION_ACTIVE",
-                "Plugin %s is already ACTIVE on tenant %s".formatted(pluginCode, tenantId));
+        for (String live : List.of("ACTIVE", "PROVISIONING")) {
+            if (!installations.findByPluginCodeAndTenantIdAndStatus(pluginCode, tenantId, live).isEmpty()) {
+                throw ApiException.conflict("PLUGIN_INSTALLATION_ACTIVE",
+                    "Plugin %s is already %s on tenant %s".formatted(pluginCode, live, tenantId));
+            }
         }
-
         PluginInstallation inst = new PluginInstallation(
             UUID.randomUUID(), pluginCode, type.version, tenantId, "PENDING_APPROVAL",
             "INHERIT", "DIRECT", config);
-        installations.save(inst);
-
-        // Open four-eyes approval
-        ApprovalRequest row = approvals.open(
-            tenantId, ApprovalRequest.OpType.PLUGIN_INSTALL, inst.id,
-            actor, actor.personId(),
-            "plugin.install %s@%s on tenant %s".formatted(pluginCode, type.version, tenantId),
-            config);
-
-        audit.record(actor.personId(), null, tenantId, null,
-            "PLUGIN_INSTALL_SUBMITTED", "PLUGIN_INSTALLATION", inst.id.toString(),
-            null, audit.hashState("plugin=" + pluginCode + ";tenant=" + tenantId + ";status=PENDING_APPROVAL"), false);
-        outbox.record("PluginInstallation", inst.id, "PluginInstallation.Submitted",
-            "{\"plugin\":\"%s\",\"tenant\":\"%s\",\"maker\":\"%s\"}".formatted(pluginCode, tenantId, actor.personId()));
-
-        log.info("plugin_install_submitted plugin={} tenant={} maker={} installationId={}",
-            pluginCode, tenantId, actor.personId(), inst.id);
-        return inst;
+        return installer.startProvisioning(inst, actor.personId(), "manual");
     }
 
-    /** Called by the PLUGIN_INSTALL approval handler after the checker approves. */
+    /** A PLUGIN_INSTALL approval opened before easy install, approved now: same one step. */
     @Transactional
     public PluginInstallation approve(UUID installationId, Actor checker) {
         PluginInstallation inst = installations.findById(installationId)
@@ -110,40 +89,7 @@ public class PluginInstallationService {
             throw ApiException.conflict("INSTALLATION_NOT_PENDING",
                 "Installation %s is not pending approval".formatted(installationId));
         }
-        inst.status = "PROVISIONING";
-        inst.updatedAt = Instant.now();
-        installations.save(inst);
-
-        // Provision default readiness gates (plugin will flip them to ACTIVE via ready())
-        // GL_ACCOUNTS_ENSURED is optional: a plugin that moves no money has no GL wiring and
-        // must not report it (KYC); money-moving plugins report it first (inventory).
-        // A plugin gets the gate only when its manifest wires ledger MACHINE grants
-        // (gl.account.* / je.post.immediate) — otherwise it could never reach ACTIVE.
-        boolean ledgerCapable = ledgerCapable(inst.pluginCode);
-        List<String> defaultGates = ledgerCapable
-            ? List.of("PERMISSIONS_SEEDED", "CLIENT_ACTIVE", "SECRETS_PROVISIONED", "DEPENDENCIES_READY", "GL_ACCOUNTS_ENSURED")
-            : List.of("PERMISSIONS_SEEDED", "CLIENT_ACTIVE", "SECRETS_PROVISIONED", "DEPENDENCIES_READY");
-        for (String gate : defaultGates) {
-            gates.save(new PluginInstallationGate(inst.id, gate, "PENDING"));
-        }
-
-        audit.record(null, checker.personId(), inst.tenantId, null,
-            "PLUGIN_INSTALL_APPROVED", "PLUGIN_INSTALLATION", inst.id.toString(),
-            null, audit.hashState("plugin=" + inst.pluginCode + ";status=PROVISIONING"), false);
-        outbox.record("PluginInstallation", inst.id, "PluginInstallation.Approved",
-            "{\"plugin\":\"%s\",\"tenant\":\"%s\",\"checker\":\"%s\"}".formatted(inst.pluginCode, inst.tenantId, checker.personId()));
-
-        log.info("plugin_install_approved installationId={} plugin={} tenant={} checker={}",
-            inst.id, inst.pluginCode, inst.tenantId, checker.personId());
-        return inst;
-    }
-
-    /** Ledger-capable = manifest declares gl.account.* / je.post.immediate (MACHINE grants / ops). */
-    private boolean ledgerCapable(String pluginCode) {
-        return types.findByCodeAndStatus(pluginCode, "REGISTERED").stream()
-            .findFirst()
-            .map(t -> t.manifest != null && (t.manifest.contains("\"gl.account.") || t.manifest.contains("je.post.immediate")))
-            .orElse(false);
+        return installer.startProvisioning(inst, checker.personId(), "legacy-approval");
     }
 
     /** Plugin reports a readiness gate (machine actor). When all gates are ACTIVE, the

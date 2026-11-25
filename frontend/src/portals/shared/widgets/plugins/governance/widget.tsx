@@ -1,7 +1,7 @@
 /**
  * plugins.governance — platform plugin governance (GAP-4): registered types, and per
- * organization the installations with their readiness gates. Register / install are REQUESTS
- * (four-eyes PLUGIN_REGISTER / PLUGIN_INSTALL), decided in Approvals by another person.
+ * organization the installations with their readiness gates. Register / install are ONE STEP
+ * (AGENTS.md §2.1 easy install): no approval — registering installs it on the platform root.
  * Selected organization lives in the URL (?org=).
  */
 import { useCallback, useState } from 'react';
@@ -56,7 +56,7 @@ export function PluginsGovernance() {
       <Panel className="p-4">
         <PageHeader
           title="Plugin types"
-          subtitle="Registration is four-eyes: you request it, another platform checker approves."
+          subtitle="One step: registering a plugin installs it for every organization; it is ready in about 30 seconds."
           actions={!registering ? <Button variant="primary" data-action="plugin.register" onClick={() => { cmd.reset(); setRegistering(true); }}>Register plugin</Button> : undefined}
         />
         <NoticeBar notice={notice} onDismiss={dismiss} />
@@ -64,7 +64,7 @@ export function PluginsGovernance() {
         {registering && (
           <div className="mb-4">
             <RegisterPluginForm busy={cmd.isPending} onCancel={() => setRegistering(false)}
-              onSubmit={(v) => run({ kind: 'register', ...v }, `Registration of ${v.code} ${v.version} requested — awaiting a checker.`)} />
+              onSubmit={(v) => run({ kind: 'register', ...v }, `${v.code} ${v.version} registered and installed — it reports ready in about 30 seconds.`)} />
           </div>
         )}
         {(types.data ?? []).length === 0
@@ -100,9 +100,9 @@ export function PluginsGovernance() {
                 <Button variant="primary" disabled={!installType || cmd.isPending} data-action="plugin.install" onClick={() => {
                   const [code, version] = installType.split('@');
                   run({ kind: 'install', orgId, code: code ?? '', version: version ?? '' },
-                    `Installation of ${code} requested — awaiting a checker.`);
+                    `${code} installed — it reports ready in about 30 seconds.`);
                 }}>
-                  {cmd.isPending ? 'Sending…' : 'Request installation'}
+                  {cmd.isPending ? 'Sending…' : 'Install'}
                 </Button>
               </div>
             )}
