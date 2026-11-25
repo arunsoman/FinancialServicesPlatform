@@ -9,5 +9,5 @@
 | backend/shared | 18 | `609da12403c8` |
 | kyc plugin | 42 | `92d78d39530e` |
 | db migrations | 45 | `3bce3c9c5463` |
-| frontend | 261 | `88c2e36fbbf0` |
+| frontend | 261 | `d104ad9f741d` |
 | infra | 2 | `31e6a7fd96a0` |
