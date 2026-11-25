@@ -2,7 +2,7 @@
 
 | Tree | Files | Fingerprint |
 |---|---:|---|
-| backend/core | 312 | `fd58ebb0a572` |
+| backend/core | 313 | `8f6d11fb019d` |
 | backend/idp | 38 | `e3821f69f66f` |
 | backend/gateway | 10 | `b6ebc4b20893` |
 | backend/bff | 17 | `0e281f890aaf` |
