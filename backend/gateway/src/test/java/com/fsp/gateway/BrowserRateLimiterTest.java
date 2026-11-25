@@ -76,4 +76,28 @@ class BrowserRateLimiterTest {
             assertThat(t.check("client-a").allowed()).isTrue();
         }
     }
+
+    /** Staging, 2026-11-25: a portal page load fires ~8 calls at once; the old default (1 per 250 ms)
+     *  rejected most of them and the portal showed a signed-in admin "No access". */
+    @Test
+    void defaultsLetAPortalPageLoadThrough() {
+        BrowserRateLimiter t = new BrowserRateLimiter(new TickingClock(), new GatewayProperties());
+        for (int i = 0; i < 12; i++) {
+            assertThat(t.check("session-a").allowed()).as("call %d of a page load", i + 1).isTrue();
+        }
+    }
+
+    /** Every browser call reaches the gateway from the BFF — same address, no cookie. The key must
+     *  be the per-session DPoP access token, or all users share one bucket. */
+    @Test
+    void twoSessionsBehindTheBffAreDifferentClients() {
+        var a = new org.springframework.mock.web.MockHttpServletRequest();
+        a.setRemoteAddr("10.201.0.7");
+        a.addHeader("Authorization", "DPoP token-of-session-a");
+        var b = new org.springframework.mock.web.MockHttpServletRequest();
+        b.setRemoteAddr("10.201.0.7");
+        b.addHeader("Authorization", "DPoP token-of-session-b");
+        assertThat(ForwardFilterConfig.ForwardFilter.clientKey(a))
+            .isNotEqualTo(ForwardFilterConfig.ForwardFilter.clientKey(b));
+    }
 }

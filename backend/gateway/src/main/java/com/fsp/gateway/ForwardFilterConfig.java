@@ -716,7 +716,15 @@ public class ForwardFilterConfig {
          * client handle; fall back to client IP. The value is SHA-256 hashed so the
          * raw cookie / IP is never stored or logged (AGENTS.md §1.5).
          */
-        private String clientKey(HttpServletRequest request) {
+        /**
+         * Who one rate-limit bucket belongs to. Browsers never reach the gateway: the BFF calls on
+         * their behalf from one address with no cookie, so the per-session DPoP-bound access token
+         * is the only per-person signal (plugins: their own machine token). Hashed, never logged.
+         * An unvalidated token only buys a bucket; JWT + DPoP validation still rejects it next.
+         */
+        static String clientKey(HttpServletRequest request) {
+            String auth = request.getHeader("Authorization");
+            if (auth != null && !auth.isBlank()) return com.fsp.shared.Es256.sha256B64("authz:" + auth);
             String cookie = request.getHeader("Cookie");
             String xff = request.getHeader("X-Forwarded-For");
             String remote = request.getRemoteAddr();

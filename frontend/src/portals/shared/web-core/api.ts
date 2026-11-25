@@ -99,6 +99,15 @@ export function api<T>(path: string, opts: ApiOpts = {}): Promise<T> {
   return p;
 }
 
+const RATE_LIMIT_ATTEMPTS = 4;
+
+/** Retry-After (seconds) when the gateway sends it, capped at 2 s; otherwise 250 ms, 500 ms, 1 s. */
+function retryDelayMs(r: Response, attempt: number): number {
+  const s = Number(r.headers.get('Retry-After'));
+  const told = Number.isFinite(s) && s > 0 ? s * 1000 : 250 * 2 ** (attempt - 1);
+  return Math.min(told, 2000);
+}
+
 async function send<T>(path: string, method: HttpMethod, opts: ApiOpts): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/problem+json, application/json' };
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
@@ -107,14 +116,21 @@ async function send<T>(path: string, method: HttpMethod, opts: ApiOpts): Promise
     if (token) headers['X-XSRF-TOKEN'] = token;
     headers['Idempotency-Key'] = opts.idempotencyKey ?? newIdempotencyKey();
   }
-  const r = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-  }).catch(() => {
-    throw new ApiError({ status: 0, title: 'Network error', detail: 'BFF unreachable' });
-  });
+  let r: Response;
+  for (let attempt = 1; ; attempt++) {
+    r = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    }).catch(() => {
+      throw new ApiError({ status: 0, title: 'Network error', detail: 'BFF unreachable' });
+    });
+    // 429 = the gateway's edge rate limit turned the call away BEFORE anything ran: wait as told
+    // and send the SAME request again (same Idempotency-Key — still one logical action).
+    if (r.status !== 429 || attempt >= RATE_LIMIT_ATTEMPTS) break;
+    await new Promise((res) => setTimeout(res, retryDelayMs(r, attempt)));
+  }
   if (r.status === 401) {
     // The BFF's own "no/ended session" answers end the session for the WHOLE page — the shell
     // sends the person to sign-in instead of every widget showing an error. Other 401s (an
