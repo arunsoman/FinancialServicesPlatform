@@ -32,6 +32,8 @@ jobs:
     permissions:
       contents: write   # push the release tag / GitHub release
       packages: read    # short-lived GHCR pull token for the server
+      pull-requests: read   # provenance: the PR behind the commit and who approved it
+      actions: read         # provenance: who approved this production deployment
     env:
       ENVIRONMENT: ${{ inputs.environment }}
       MODE: ${{ inputs.mode }}
@@ -69,6 +71,31 @@ jobs:
           python3 deploy/pipeline/scripts/gen-plugins.py . bundle   # plugins from backend/plugins/*/
           echo "FSP_HOME=$(grep '^FSP_HOME=' bundle/params.env | cut -d= -f2)" >> "$GITHUB_ENV"
 
+      # Plugins ship as code (docs/plugin-registration.md): the deploy registers the plugin
+      # manifests this release ships, and records WHO stands behind them — the PR, its author, its
+      # approving reviewers and (production) the environment's deploy approvers.
+      - name: Release provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT: ${{ steps.r.outputs.commit }}
+          NAME: ${{ steps.r.outputs.name }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          pr="$(gh api "repos/$repo/commits/$COMMIT/pulls" --jq '[.[] | select(.merged_at != null)][0].number // empty' || true)"
+          author=""; reviewers='[]'; merged_by=""
+          if [ -n "$pr" ]; then
+            author="$(gh api "repos/$repo/pulls/$pr" --jq '.user.login')"
+            merged_by="$(gh api "repos/$repo/pulls/$pr" --jq '.merged_by.login // ""')"
+            reviewers="$(gh api --paginate "repos/$repo/pulls/$pr/reviews" --jq '[.[] | select(.state == "APPROVED") | .user.login]' | jq -s 'add // [] | unique')"
+          fi
+          approvers="$(gh api "repos/$repo/actions/runs/$GITHUB_RUN_ID/approvals" --jq '[.[] | select(.state == "approved") | .user.login] | unique' 2>/dev/null || echo '[]')"
+          jq -n --arg release "$NAME" --arg commit "$COMMIT" --arg env "$ENVIRONMENT" --arg mode "$MODE"                 --arg pr "$pr" --arg author "$author" --arg mergedBy "$merged_by"                 --argjson reviewers "$reviewers" --argjson deployApprovers "$approvers"                 --arg actor "$GITHUB_ACTOR" --arg run "$GITHUB_SERVER_URL/$repo/actions/runs/$GITHUB_RUN_ID"             '{release: $release, commit: $commit, environment: $env, mode: $mode,
+              pr: (if $pr == "" then null else ($pr | tonumber) end), author: (if $author == "" then null else $author end),
+              mergedBy: (if $mergedBy == "" then null else $mergedBy end), reviewers: $reviewers,
+              deployApprovers: $deployApprovers, triggeredBy: $actor, run: $run}' > bundle/provenance.json
+          cat bundle/provenance.json
+
       - name: SSH identity
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -103,10 +130,10 @@ jobs:
           printf '%s\n' "$GHCR_TOKEN" \
             | ssh fsp-target env GHCR_USER="$GITHUB_ACTOR" bash "$dest/scripts/deploy.sh" "$dest" "$NAME" "$MODE" \
             | tee deploy.log
-          # plugin drift → run summary (registration is a four-eyes act in the admin portal)
-          if grep -q '^plugin drift' deploy.log; then
-            { echo '### Plugin drift'; echo '```'; sed -n '/^plugin drift/,$p' deploy.log; echo '```'
-              echo 'Not in sync → admin portal › Plugins › Register (maker) with the manifest shown, then a different admin approves (checker). Grafana › FSP releases & plugins lists every version.'
+          # plugin registration + drift → run summary
+          if grep -q '^plugin registration\|^plugin drift' deploy.log; then
+            { echo '### Plugins'; echo '```'; sed -n '/^plugin registration/,$p' deploy.log; echo '```'
+              echo 'Suspend / resume / register by hand: the ops console (Grafana › Plugins) at /ops/ on this environment — maker + a different checker.'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 

@@ -20,7 +20,8 @@ import java.util.UUID;
  * ActorContextFilter; never routed by the gateway).
  *
  *  GET /internal/ops/plugins → { code: { baseUrl, operations: [{id, method, path, permission}] } }
- *      for REGISTERED types only — the plugin routes the gateway may forward, each with the
+ *      for REGISTERED types (+ SUSPENDED ones, flagged: the gateway answers them 503
+ *      PLUGIN_SUSPENDED instead of 404) — the plugin routes the gateway may forward, each with the
  *      permission core will decide on. Taken from the four-eyes-approved manifest, never
  *      from the plugin at runtime.
  *  GET /internal/plugins/{code}/effective?tenantId= → readiness (applies) for the gateway's
@@ -44,7 +45,10 @@ public class PluginInternalController {
     public Map<String, Object> plugins() {
         Map<String, Object> out = new LinkedHashMap<>();
         for (PluginType t : types.findAll()) {
-            if (!"REGISTERED".equals(t.status)) continue;
+            boolean suspended = "SUSPENDED".equals(t.status);
+            if (!"REGISTERED".equals(t.status) && !suspended) continue;
+            // a REGISTERED version always wins over a suspended one of the same code
+            if (suspended && (out.containsKey(t.code) || types.findByCodeAndStatus(t.code, "REGISTERED").size() > 0)) continue;
             List<Map<String, String>> ops = new ArrayList<>();
             try {
                 JsonNode manifest = MAPPER.readTree(t.manifest);
@@ -59,7 +63,8 @@ public class PluginInternalController {
             } catch (Exception e) {
                 log.warn("plugin_manifest_unreadable code={} version={}", t.code, t.version);
             }
-            out.put(t.code, Map.of("baseUrl", t.baseUrl, "version", t.version, "operations", ops));
+            out.put(t.code, Map.of("baseUrl", t.baseUrl, "version", t.version, "operations", ops,
+                "suspended", suspended));
         }
         return out;
     }

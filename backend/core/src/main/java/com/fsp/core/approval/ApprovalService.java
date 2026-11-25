@@ -64,6 +64,27 @@ public class ApprovalService {
         return open(tenantId, operationType, targetResourceId, maker, maker == null ? null : maker.personId(), payloadDescription, payload, null);
     }
 
+    /**
+     * Close a PENDING request whose subject was settled another way (e.g. the plugin version it
+     * asks to register was registered by a release). Recorded as REJECTED with the reason and no
+     * checker — nobody decided it, so no handler runs and nobody is credited as checker.
+     */
+    @Transactional
+    public int withdrawPendingFor(String operationType, UUID targetResourceId, String reason) {
+        String opType = canonicalOpType(operationType);
+        int n = 0;
+        for (ApprovalRequest row : repository.findByTargetResourceIdAndStatus(targetResourceId, ApprovalRequest.Status.PENDING_CHECKER)) {
+            if (!opType.equals(row.operationType)) continue;
+            row.status = ApprovalRequest.Status.REJECTED;
+            row.reason = "withdrawn: " + reason;
+            row.decidedAt = java.time.Instant.now();
+            repository.save(row);
+            log.info("approval_withdrawn id={} type={} target={} reason={}", row.id, opType, targetResourceId, reason);
+            n++;
+        }
+        return n;
+    }
+
     /** Look up an approval request by id (used by domain handlers). */
     public ApprovalRequest findById(UUID approvalId) {
         return repository.findById(approvalId)
@@ -210,7 +231,9 @@ public class ApprovalService {
                  ApprovalRequest.OpType.USER_REMOVE,
                  ApprovalRequest.OpType.USER_PASSWORD_RESET -> "user.manage";
             case ApprovalRequest.OpType.PLUGIN_REGISTER,
-                 ApprovalRequest.OpType.PLUGIN_INSTALL -> "plugin.manage";
+                 ApprovalRequest.OpType.PLUGIN_INSTALL,
+                 ApprovalRequest.OpType.PLUGIN_SUSPEND,
+                 ApprovalRequest.OpType.PLUGIN_RESUME -> "plugin.manage";
             case ApprovalRequest.OpType.ROLE_CREATE,
                  ApprovalRequest.OpType.ROLE_UPDATE,
                  ApprovalRequest.OpType.ROLE_DELETE,
@@ -237,7 +260,8 @@ public class ApprovalService {
             case ApprovalRequest.OpType.KYC_TENANT_ACTIVATION -> "kyc.approve";
             case ApprovalRequest.OpType.JE_POSTING -> "je.approve";
             case ApprovalRequest.OpType.UI_LAYOUT_PUBLISH -> "ui.layout.manage";
-            case ApprovalRequest.OpType.PLUGIN_REGISTER, ApprovalRequest.OpType.PLUGIN_INSTALL -> "plugin.manage";
+            case ApprovalRequest.OpType.PLUGIN_REGISTER, ApprovalRequest.OpType.PLUGIN_INSTALL,
+                 ApprovalRequest.OpType.PLUGIN_SUSPEND, ApprovalRequest.OpType.PLUGIN_RESUME -> "plugin.manage";
             case ApprovalRequest.OpType.ROLE_CREATE, ApprovalRequest.OpType.ROLE_UPDATE,
                  ApprovalRequest.OpType.ROLE_DELETE,
                  ApprovalRequest.OpType.BRANCH_CREATE, ApprovalRequest.OpType.BRANCH_UPDATE,
@@ -445,6 +469,8 @@ public class ApprovalService {
             case ApprovalRequest.OpType.UI_LAYOUT_PUBLISH -> ApprovalRequest.OpType.UI_LAYOUT_PUBLISH;
             case ApprovalRequest.OpType.PLUGIN_REGISTER -> ApprovalRequest.OpType.PLUGIN_REGISTER;
             case ApprovalRequest.OpType.PLUGIN_INSTALL -> ApprovalRequest.OpType.PLUGIN_INSTALL;
+            case ApprovalRequest.OpType.PLUGIN_SUSPEND -> ApprovalRequest.OpType.PLUGIN_SUSPEND;
+            case ApprovalRequest.OpType.PLUGIN_RESUME -> ApprovalRequest.OpType.PLUGIN_RESUME;
             case ApprovalRequest.OpType.ROLE_CREATE -> ApprovalRequest.OpType.ROLE_CREATE;
             case ApprovalRequest.OpType.ROLE_UPDATE -> ApprovalRequest.OpType.ROLE_UPDATE;
             case ApprovalRequest.OpType.ROLE_DELETE -> ApprovalRequest.OpType.ROLE_DELETE;

@@ -95,7 +95,7 @@ public class PluginRegistryService {
         type.approvedBy = checker.personId();
         type.approvedAt = Instant.now();
         types.save(type);
-        provisionMachineClient(type, checker);
+        provisionMachineClient(type, checker.activeTenantId(), checker.personId());
 
         audit.record(null, checker.personId(), checker.activeTenantId(), null,
             "PLUGIN_REGISTERED", "PLUGIN_TYPE", type.id.toString(),
@@ -110,9 +110,10 @@ public class PluginRegistryService {
     /**
      * The plugin's machine identity comes ONLY from the four-eyes-approved manifest (plan §5.1):
      * client id plugin-&lt;code&gt;, its PUBLIC client-auth JWKS, and a CLOSED list of grants (each
-     * must be an existing permission). Created on approval, owned by the approver's tenant.
+     * must be an existing permission). Created on approval, owned by the approver's tenant —
+     * or, for a release registration, by the platform root with no granting person.
      */
-    private void provisionMachineClient(PluginType type, Actor checker) {
+    void provisionMachineClient(PluginType type, UUID owner, UUID grantedBy) {
         com.fasterxml.jackson.databind.JsonNode m;
         try {
             m = MAPPER.readTree(type.manifest);
@@ -129,7 +130,6 @@ public class PluginRegistryService {
                 throw ApiException.badRequest("PLUGIN_MANIFEST_INVALID", "client jwks must hold public keys only");
             }
         }
-        UUID owner = checker.activeTenantId();
         jdbc.update("INSERT INTO oauth_clients (client_id, client_type, jwks, grant_types, status, owner_tenant_id, token_ttl_s) "
                 + "VALUES (?, 'MACHINE', ?::jsonb, '[\"client_credentials\"]', 'ACTIVE', ?, 300) "
                 + "ON CONFLICT (client_id) DO UPDATE SET jwks = EXCLUDED.jwks, status = 'ACTIVE', updated_at = now()",
@@ -143,11 +143,16 @@ public class PluginRegistryService {
                 throw ApiException.badRequest("PLUGIN_MANIFEST_INVALID", "unknown grant " + key + " (" + kind + ")");
             }
             granted += jdbc.update("INSERT INTO client_grants (client_id, owner_tenant_id, operation_or_permission, kind, granted_by) "
-                + "VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING", clientId, owner, key, kind, checker.personId());
+                + "VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING", clientId, owner, key, kind, grantedBy);
         }
-        audit.record(null, checker.personId(), owner, null, "PLUGIN_CLIENT_PROVISIONED", "OAUTH_CLIENT", clientId,
+        audit.record(null, grantedBy, owner, null, "PLUGIN_CLIENT_PROVISIONED", "OAUTH_CLIENT", clientId,
             null, audit.hashState("client=" + clientId + ";grants=" + granted), false);
         log.info("plugin_client_provisioned client={} owner={} grants={}", clientId, owner, granted);
+    }
+
+    /** The IdP refuses a client that is not ACTIVE on every token request (I7) — suspend = no tokens. */
+    void setMachineClientStatus(String code, String status) {
+        jdbc.update("UPDATE oauth_clients SET status = ?, updated_at = now() WHERE client_id = ?", status, "plugin-" + code);
     }
 
     public PluginType find(String code, String version) {

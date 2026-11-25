@@ -34,3 +34,7 @@ FSP_KEEP_DAYS=30
 # observability (deploy/monitoring): release + plugin-drift metrics, per-env plugin manifests
 FSP_MONITOR_TEXTFILE=/home/ubuntu/fsp-monitor/textfile
 FSP_MANIFEST_ROOT=/var/www/fsp-monitor.stage.afriqpay.com/manifests
+# plugins ship as code (docs/plugin-registration.md): registered on deploy only when someone other
+# than the PR author reviewed the PR or approved the production deploy (both are recorded).
+FSP_PLUGIN_AUTOREGISTER=1
+FSP_PLUGIN_AUTOREG_SECOND_PERSON=1

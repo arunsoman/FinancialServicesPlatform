@@ -37,7 +37,7 @@ public class CatalogRouteTable {
 
     /** A plugin-contributed operation from the REGISTERED manifest (core /internal/ops/plugins). */
     public record PluginOp(String code, String baseUrl, String method, String pathTemplate, Pattern matcher,
-                           String operationId, String permission) {}
+                           String operationId, String permission, boolean suspended) {}
 
     /** A PLATFORM-SERVICE operation (emi/psp) from the service's own descriptor at its /internal/ops/catalog. */
     public record ServiceOp(String component, String baseUrl, String method, String pathTemplate,
@@ -147,6 +147,7 @@ public class CatalogRouteTable {
                     String code = entry.getKey();
                     var v = entry.getValue();
                     String baseUrl = v.isTextual() ? v.asText() : v.path("baseUrl").asText();
+                    boolean suspended = v.path("suspended").asBoolean(false);   // four-eyes suspension → 503
                     rebuilt.add(new java.util.AbstractMap.SimpleEntry<>(code, baseUrl));
                     String prefix = "/v1/plugins/" + code + "/";
                     v.path("operations").forEach(op -> {
@@ -157,7 +158,7 @@ public class CatalogRouteTable {
                         if (path.startsWith(prefix) || path.equals(prefix.substring(0, prefix.length() - 1))) {
                             if (!perm.isBlank() && !method.isBlank()) {
                                 ops.add(new PluginOp(code, baseUrl, method, path, compile(path),
-                                    op.path("id").asText(), perm));
+                                    op.path("id").asText(), perm, suspended));
                             }
                         } else {
                             log.warn("gateway_plugin_op_rejected plugin={} path={} reason=outside_prefix", code, path);

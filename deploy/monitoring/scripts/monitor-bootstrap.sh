@@ -145,6 +145,78 @@ server {
         proxy_set_header X-Forwarded-Proto https;
     }
 }"
+
+# --- 5b. ops console per environment: https://<env host>/ops/ (Grafana, signed in by the BFF) ---
+# FAPI 2.0: nginx asks the environment's BFF who holds the session (auth_request /bff/ops/auth)
+# and hands Grafana only that name, OVERWRITING any X-WEBAUTH-* header the browser sent. Same
+# origin as the portal, so the plugins panel acts with the person's own session + CSRF.
+ops_console() { # env public-host bff-port grafana-port
+  local env="$1" host="$2" bff="$3" port="$4" snip="/etc/nginx/snippets/fsp-ops-$1.conf"
+  local site="/etc/nginx/sites-available/$host"
+  sudo test -e "$site" || { log "ops console $env: vhost $host missing — skipped"; return 0; }
+  sudo mkdir -p /etc/nginx/snippets
+  sudo tee "$snip" >/dev/null <<EOF
+# FSP ops console ($env) — Grafana behind the BFF session. Managed by deploy/monitoring/scripts/monitor-bootstrap.sh
+location = /ops/_auth {
+    internal;
+    proxy_pass http://127.0.0.1:$bff/bff/ops/auth;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto https;
+}
+location @ops_login { return 302 /bff/auth/login?return_to=/ops/; }
+location @ops_forbidden { default_type text/plain; return 403 "FSP ops console: platform staff only\n"; }
+location /ops/manifests/ {
+    auth_request /ops/_auth;
+    error_page 401 = @ops_login;
+    error_page 403 = @ops_forbidden;
+    alias $FSP_MANIFEST_ROOT/$env/;
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+}
+location /ops/ {
+    auth_request /ops/_auth;
+    auth_request_set \$ops_user \$upstream_http_x_fsp_ops_user;
+    auth_request_set \$ops_name \$upstream_http_x_fsp_ops_name;
+    error_page 401 = @ops_login;
+    error_page 403 = @ops_forbidden;
+    proxy_pass http://127.0.0.1:$port;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection \$http_connection;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-WEBAUTH-USER \$ops_user;
+    proxy_set_header X-WEBAUTH-NAME \$ops_name;
+}
+EOF
+  if ! sudo grep -q "include $snip;" "$site"; then
+    # only the main server block proxies /bff/ (certbot's port-80 block just redirects)
+    sudo grep -q 'location /bff/' "$site" || { log "ops console $env: no 'location /bff/' in $site — include $snip by hand"; return 0; }
+    sudo cp -a "$site" "$site.before-ops"
+    sudo python3 - "$site" "$snip" <<'PY'
+import sys
+site, snip = sys.argv[1], sys.argv[2]
+s = open(site).read()
+i = s.index("    location /bff/")
+open(site, "w").write(s[:i] + f"    include {snip};\n" + s[i:])
+PY
+    log "ops console $env: included $snip in $site (backup $site.before-ops)"
+  fi
+}
+ops_console staging "$GRAFANA_STAGING_HOST" "$GRAFANA_STAGING_BFF_PORT" "$GRAFANA_PORT"
+if [ "${GRAFANA_PRODUCTION_ENABLED:-0}" = 1 ]; then
+  ops_console production "$GRAFANA_PRODUCTION_HOST" "$GRAFANA_PRODUCTION_BFF_PORT" "$GRAFANA_PRODUCTION_PORT"
+fi
+# the old shared-Grafana host keeps only /manifests (basic auth): Grafana there would get no
+# signed-in user from the BFF, and must never be reachable around it
+if sudo grep -q "proxy_pass http://127.0.0.1:$GRAFANA_PORT;" "/etc/nginx/sites-available/$GRAFANA_HOST" 2>/dev/null; then
+  sudo sed -i "s|proxy_pass http://127.0.0.1:$GRAFANA_PORT;|return 302 https://$GRAFANA_STAGING_HOST/ops/;|" "/etc/nginx/sites-available/$GRAFANA_HOST"
+  log "$GRAFANA_HOST: Grafana moved to https://$GRAFANA_STAGING_HOST/ops/ (redirect)"
+fi
+
 sudo nginx -t || die "nginx config test failed — nothing reloaded (remove the new monitoring vhosts and retry)"
 sudo systemctl reload nginx
 if ! sudo test -d "/etc/letsencrypt/live/$GRAFANA_HOST"; then

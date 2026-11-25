@@ -81,6 +81,8 @@ services:
       FSP_INTERNAL_CREDENTIAL_IDP: ${FSP_INTERNAL_CREDENTIAL_IDP:?}  # core → idp hop
       FSP_IDP_URL: http://idp:8082
       FSP_PERSON_PASSWORD: ${FSP_PERSON_PASSWORD:?}
+      # held by core + the deploy only: opens POST /internal/release/plugins (blank = closed)
+      FSP_RELEASE_CREDENTIAL: ${FSP_RELEASE_CREDENTIAL:-}
       SPRING_APPLICATION_JSON: '{"fsp":{"tigerbeetle":{"addresses":"${FSP_TB_IP}:3000"},"gateway":{"actor-jwks-url":"http://gateway:8090/.well-known/fsp-actor-jwks"}}}'
     volumes:
       - ${FSP_CONF_DIR:?}/pki:/opt/fsp/pki:ro

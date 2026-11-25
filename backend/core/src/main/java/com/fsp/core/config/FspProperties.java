@@ -31,6 +31,11 @@ public class FspProperties {
         public void setInternalCredential(String v) { this.internalCredential = v; }
         public String getEmiInternalCredential() { return emiInternalCredential; }
         public void setEmiInternalCredential(String v) { this.emiInternalCredential = v; }
+        /** Held ONLY by the deploy (never by the gateway/BFF): opens POST /internal/release/plugins,
+         *  the "plugins ship as code" registration (docs/plugin-registration.md). Blank = closed. */
+        private String releaseCredential = "";
+        public String getReleaseCredential() { return releaseCredential; }
+        public void setReleaseCredential(String v) { this.releaseCredential = v; }
         private String defaultPersonPassword = "fsp-person-2026";
         /** Red-team P1 fix: machine-plane allowlist for the recon paging op — a forged
          *  unregistered client id must never fire platform pages. */

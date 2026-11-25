@@ -8,9 +8,23 @@ FSP_MON_SLICE=fsp-monitor.slice
 FSP_MON_SUBNET=10.202.0.0/24
 FSP_UID=1000
 FSP_GID=1000
+# fsp-monitor.stage.* now only serves the per-environment plugin manifests (basic auth);
+# Grafana itself is the ops console of EACH environment, signed in through that environment's BFF:
+#   staging    https://fsp.stage.afriqpay.com/ops/   (port GRAFANA_PORT)
+#   production https://fsp.afriqpay.com/ops/         (port GRAFANA_PRODUCTION_PORT; off until
+#              GRAFANA_PRODUCTION_ENABLED=1 — its nginx vhost is the hand-made production one)
 GRAFANA_HOST=fsp-monitor.stage.afriqpay.com
 PROM_HOST=prom.stage.afriqpay.com
 GRAFANA_PORT=29300
+GRAFANA_STAGING_HOST=fsp.stage.afriqpay.com
+GRAFANA_STAGING_BFF_PORT=29080
+GRAFANA_PRODUCTION_ENABLED=0
+GRAFANA_PRODUCTION_HOST=fsp.afriqpay.com
+GRAFANA_PRODUCTION_BFF_PORT=19080
+GRAFANA_PRODUCTION_PORT=29301
+# the only address Grafana accepts the signed-in user header from: the host (nginx), as seen
+# through the docker port mapping = the gateway of FSP_MON_SUBNET
+FSP_MON_HOST_IP=10.202.0.1
 PROM_PORT=29390
 GITHUB_REPO=arunsoman/FinancialServicesPlatform
 FSP_STAGE_HOME=/home/ubuntu/fsp-stage

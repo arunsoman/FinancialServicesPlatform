@@ -37,11 +37,11 @@
         "x": 0,
         "y": 0,
         "w": 24,
-        "h": 7
+        "h": 8
       },
       "options": {
         "mode": "markdown",
-        "content": "### Roll back to a tagged release\n1. Pick a release in **Releases you can roll back to** and click **Roll back to this release** \u2014 it opens the GitHub *rollback* workflow.\n2. **Run workflow** \u2192 choose the environment, paste the release name (e.g. `prod-2026.12.01-42`), give a reason.\n3. Production asks a second person to approve. Nothing is rebuilt: the tag's exact images come back; the database stays (expand/contract migrations).\n\n### Upgrade (or downgrade) a plugin version\n1. In **Plugin drift**, anything not `in_sync` needs a registration. **Open manifest** shows the exact JSON for *that environment* (its own public key is already in it).\n2. Admin portal \u203a **Plugins** \u203a **Register**: paste the manifest (maker). A **different** admin approves it in **Approvals** (checker). Within 5 minutes the row turns `in_sync`.\n3. **Plugin versions you can register** lists every version shipped to an environment \u2014 register an older one to go back.\n\nReleases + plugin data refresh every 5 minutes and after every deploy. Logs \u2192 *FSP logs*; CPU/RAM/disk \u2192 *FSP containers & disk*."
+        "content": "### Roll back to a tagged release\n1. Pick a release in **Releases you can roll back to** and click **Roll back to this release** — it opens the GitHub *rollback* workflow.\n2. **Run workflow** → choose the environment, paste the release name (e.g. `prod-2026.12.01-42`), give a reason.\n3. Production asks a second person to approve. Nothing is rebuilt: the tag's exact images come back; the database stays (expand/contract migrations).\n\n### Plugins ship as code\n* **Every deploy registers the plugin versions it ships** — the PR review (and, in production, the deploy approval) are the four eyes, recorded with the registration. Nothing to do by hand.\n* **Plugins** (below) is for people: **Suspend** takes a plugin out of service (gateway answers 503, data kept), **Resume** brings it back, **Register** re-registers a version by hand. Each one is a request — a **different** person approves it in the same panel. A suspension is never lifted by a deploy.\n* **Plugin versions you can register** lists every version shipped here — register an older one to go back.\n\nReleases + plugin data refresh every 5 minutes and after every deploy. Logs → *FSP logs*; CPU/RAM/disk → *FSP containers & disk*."
       }
     },
     {
@@ -55,7 +55,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 7,
+        "y": 8,
         "w": 12,
         "h": 5
       },
@@ -149,7 +149,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 7,
+        "y": 8,
         "w": 12,
         "h": 5
       },
@@ -177,7 +177,7 @@
                   "index": 0
                 },
                 "2": {
-                  "text": "Drifted \u2014 staging \u2260 production",
+                  "text": "Drifted — staging ≠ production",
                   "color": "orange",
                   "index": 1
                 }
@@ -211,14 +211,14 @@
       "id": 4,
       "type": "table",
       "title": "Releases you can roll back to",
-      "description": "Release bundles kept on the server. Older tags can still be rolled back to from GitHub \u203a Actions \u203a rollback.",
+      "description": "Release bundles kept on the server. Older tags can still be rolled back to from GitHub › Actions › rollback.",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 13,
         "w": 24,
         "h": 9
       },
@@ -308,17 +308,46 @@
       }
     },
     {
-      "id": 5,
-      "type": "table",
-      "title": "Plugin drift",
-      "description": "shipped = plugin version the running process has; registered = what the gateway routes. Registration is four-eyes in the admin portal (machines are never maker or checker).",
+      "id": 8,
+      "type": "fsp-plugins-panel",
+      "title": "Plugins — register · suspend · resume · approve",
+      "description": "Actions run as YOU through the FSP session (BFF → gateway → core). Core decides: plugin.register to request, plugin.manage to approve, approver ≠ requester.",
       "datasource": {
         "type": "prometheus",
         "uid": "prom"
       },
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 22,
+        "w": 24,
+        "h": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom"
+          },
+          "expr": "fsp_plugin_drift",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "options": {}
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Plugin drift",
+      "description": "shipped = plugin version the running process has; registered = what the gateway routes, and by whom (release = shipped as code; approval = maker + checker).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 33,
         "w": 24,
         "h": 7
       },
@@ -343,7 +372,10 @@
               "__name__": true,
               "instance": true,
               "job": true,
-              "Value": true
+              "Value": true,
+              "base_url": true,
+              "ops_manifest": true,
+              "env": true
             },
             "renameByName": {}
           }
@@ -369,8 +401,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open manifest (copy into Admin \u203a Plugins \u203a Register)",
-                    "url": "${__data.fields.manifest_url}",
+                    "title": "Open manifest",
+                    "url": "/ops/manifests/${__data.fields.ops_manifest}",
                     "targetBlank": true
                   }
                 ]
@@ -473,7 +505,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 28,
+        "y": 40,
         "w": 8,
         "h": 6
       },
@@ -525,7 +557,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 28,
+        "y": 40,
         "w": 16,
         "h": 6
       },
@@ -577,7 +609,7 @@
                 "value": [
                   {
                     "title": "Open manifest",
-                    "url": "${__data.fields.manifest_url}",
+                    "url": "/ops/manifests/${__data.fields.code}-${__data.fields.version}.json",
                     "targetBlank": true
                   }
                 ]

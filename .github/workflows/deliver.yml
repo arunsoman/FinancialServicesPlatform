@@ -43,6 +43,8 @@ jobs:
     permissions:
       contents: write
       packages: read
+      pull-requests: read
+      actions: read
 
   production:
     needs: build
@@ -54,3 +56,5 @@ jobs:
     permissions:
       contents: write
       packages: read
+      pull-requests: read
+      actions: read
