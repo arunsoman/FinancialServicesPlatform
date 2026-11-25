@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -39,6 +40,11 @@ import java.util.UUID;
 @Slf4j
 @Service
 public class KycCustomerService {
+
+    private static final Set<String> CUSTOMER_FIELD_REJECTIONS = Set.of(
+        "CUSTOMER_FIELDS", "CUSTOMER_EMAIL_TAKEN", "CUSTOMER_PHONE_TAKEN", "CUSTOMER_CONTACT_TAKEN",
+        "EMAIL_INVALID", "PHONE_INVALID", "PRIMARY_CONTACT_INVALID", "CONTACT_REQUIRED",
+        "USERNAME_INVALID", "USERNAME_TAKEN");
 
     private final KycCaseRepository cases;
     private final KycCaseService caseService;
@@ -130,7 +136,20 @@ public class KycCustomerService {
         body.put("email", v.email());
         body.put("phone", v.phone());
         body.put("primaryContact", v.primaryContact());
-        Map<String, Object> person = core.createCustomer(ownerTenantId, body, actorAssertion, "kyc-customer-" + caseId);
+        Map<String, Object> person;
+        try {
+            person = core.createCustomer(ownerTenantId, body, actorAssertion, "kyc-customer-" + caseId);
+        } catch (ApiProblemException e) {
+            if (CUSTOMER_FIELD_REJECTIONS.contains(e.getCode())) {
+                tx.executeWithoutResult(s -> {
+                    cases.deleteById(caseId);
+                    idempotency.findByPersonIdAndRequestKey(makerPersonId, idempotencyKey)
+                        .ifPresent(idempotency::delete);
+                });
+                log.warn("kyc_customer_registration_validation_rejected caseId={} code={}", caseId, e.getCode());
+            }
+            throw e;
+        }
         UUID personId = UUID.fromString(String.valueOf(person.get("personId")));
         tx.executeWithoutResult(s -> {
             KycCase c = cases.findById(caseId).orElseThrow();
