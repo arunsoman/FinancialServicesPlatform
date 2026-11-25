@@ -271,6 +271,63 @@ public class PluginInstallationService {
         return new EffectiveInstallation(null, "NONE", false);
     }
 
+    /**
+     * Why a plugin does NOT apply to a tenant — for the gateway's 503 and its log line, so
+     * "not ready" is never a mystery (staging 2026-11-25: the type was registered on deploy but
+     * nobody had installed it anywhere, and the screen said "it finishes setting up on its own").
+     * Looks at the target tenant and its ancestors, every status. Never used to grant anything.
+     */
+    public NotReady whyNot(String pluginCode, UUID tenantId, EffectiveInstallation effective) {
+        if (!types.findByCodeAndStatus(pluginCode, "SUSPENDED").isEmpty()) {
+            return new NotReady("PLUGIN_SUSPENDED", "The %s plugin is suspended platform-wide".formatted(pluginCode));
+        }
+        if (types.findByCodeAndStatus(pluginCode, "REGISTERED").isEmpty()) {
+            return new NotReady("NOT_REGISTERED", "The %s plugin is not registered on this platform".formatted(pluginCode));
+        }
+        if ("PROHIBITED".equals(effective.origin())) {
+            return new NotReady("PROHIBITED", "A parent organization prohibits the %s plugin here".formatted(pluginCode));
+        }
+        Tenant target = tenants.findById(tenantId).orElse(null);
+        String path = target == null || target.hierarchyPath == null ? "/" + tenantId : target.hierarchyPath;
+        Set<UUID> chain = new java.util.LinkedHashSet<>();
+        chain.add(tenantId);
+        for (String part : path.replaceFirst("^/", "").split("/")) {
+            try { if (!part.isBlank()) chain.add(UUID.fromString(part)); } catch (IllegalArgumentException ignored) {}
+        }
+        List<PluginInstallation> found = installations.findByPluginCode(pluginCode).stream()
+            .filter(i -> chain.contains(i.tenantId)).toList();
+        if (found.isEmpty()) {
+            return new NotReady("NOT_INSTALLED",
+                "The %s plugin is not installed for this organization or any parent. A platform administrator installs it under Plugins (four-eyes).".formatted(pluginCode));
+        }
+        for (PluginInstallation i : found) {
+            if ("PROVISIONING".equals(i.status)) {
+                String pending = gates.findByInstallationId(i.id).stream()
+                    .filter(g -> !"ACTIVE".equals(g.status)).map(g -> g.gate).sorted()
+                    .collect(java.util.stream.Collectors.joining(","));
+                return new NotReady("PROVISIONING",
+                    "The %s plugin is still setting itself up (waiting on: %s)".formatted(pluginCode, pending));
+            }
+        }
+        for (PluginInstallation i : found) {
+            if ("PENDING_APPROVAL".equals(i.status)) {
+                return new NotReady("PENDING_APPROVAL",
+                    "Installing the %s plugin is waiting for a second administrator to approve it".formatted(pluginCode));
+            }
+        }
+        for (PluginInstallation i : found) {
+            if ("SUSPENDED".equals(i.status) || "DEACTIVATED".equals(i.status)) {
+                return new NotReady("INSTALLATION_" + i.status,
+                    "The %s plugin is %s for this organization".formatted(pluginCode, i.status.toLowerCase()));
+            }
+        }
+        return new NotReady("NOT_ENABLED",
+            "The %s plugin is installed above this organization but not enabled for it (%s)".formatted(pluginCode, effective.origin()));
+    }
+
     /** Result of effective-installation resolution. */
     public record EffectiveInstallation(PluginInstallation installation, String origin, boolean applies) {}
+
+    /** Why a plugin does not apply: a stable reason code plus a sentence a person can act on. */
+    public record NotReady(String reason, String detail) {}
 }

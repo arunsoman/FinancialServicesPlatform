@@ -274,7 +274,7 @@ export function KycCustomers() {
   if (page.isError) {
     const p = toProblem(page.error);
     if (isForbidden(page.error)) return <StatePanel kind="forbidden" title="Not allowed here" hint="Customer KYC needs kyc.review." />;
-    if (isNotReady(p)) return <StatePanel kind="error" title="The KYC plugin isn’t ready yet" hint="It finishes setting up on its own — try again shortly." onRetry={() => void page.refetch()} />;
+    if (isNotReady(p)) return <StatePanel kind="error" title="KYC isn’t available for this organization" hint={p.message || 'The KYC plugin is not installed, suspended, or still being set up.'} onRetry={() => void page.refetch()} />;
     return <StatePanel kind="error" title="Couldn’t load customers" hint={p.message} onRetry={() => void page.refetch()} />;
   }
 

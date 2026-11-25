@@ -72,6 +72,11 @@ public class PluginInternalController {
     @GetMapping("/internal/plugins/{code}/effective")
     public Map<String, Object> effective(@PathVariable("code") String code, @RequestParam("tenantId") UUID tenantId) {
         var e = installations.effective(code, tenantId);
-        return Map.of("applies", e.applies(), "origin", e.origin() == null ? "" : e.origin());
+        String origin = e.origin() == null ? "" : e.origin();
+        if (e.applies()) return Map.of("applies", true, "origin", origin);
+        var why = installations.whyNot(code, tenantId, e);
+        log.warn("plugin_not_effective plugin={} tenant={} reason={} origin={} detail={}",
+            code, tenantId, why.reason(), origin, why.detail());
+        return Map.of("applies", false, "origin", origin, "reason", why.reason(), "detail", why.detail());
     }
 }

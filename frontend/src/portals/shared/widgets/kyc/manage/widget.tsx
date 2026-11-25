@@ -161,7 +161,7 @@ export function KycManage() {
       <div className="grid justify-items-center gap-3">
         <EmptyState
           title="KYC isn’t enabled for this organization"
-          hint="The KYC plugin is not installed, suspended, or still being set up. An administrator can enable it from Plugins."
+          hint={listProblem?.message || 'The KYC plugin is not installed, suspended, or still being set up. An administrator can enable it from Plugins.'}
         />
         <Button variant="ghost" onClick={() => void page.refetch()}>Check again</Button>
       </div>
