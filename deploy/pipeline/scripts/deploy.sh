@@ -198,10 +198,11 @@ running() { [ "$(docker inspect -f '{{.State.Running}}' "$(container "$1")" 2>/d
 snapshot_pre_pipeline() {
   [ -e "$FSP_HOME/current" ] && return 0
   running core || return 0
-  # only a HAND-MADE stack is adopted: containers left by an earlier (failed) pipeline deploy
-  # run pipeline images and are not a known-good state to return to
+  # only a HAND-MADE stack is adopted: once the pipeline has touched containers here (even in
+  # a failed attempt — marker written at CHANGED=1), what runs is not a known-good state
+  [ -e "$FSP_HOME/.pipeline-started" ] && return 0
   local img; img="$(docker inspect -f '{{.Config.Image}}' "$(container core)" 2>/dev/null || true)"
-  case "$img" in "${FSP_REGISTRY:-ghcr.io}"/*) return 0 ;; esac
+  case "$img" in "${FSP_REGISTRY:-ghcr.io}"/*|*-pre-pipeline/*) return 0 ;; esac
   local snap="$FSP_HOME/releases/pre-pipeline"
   [ -d "$snap" ] && return 0
   log "no pipeline release yet — snapshotting the running stack as 'pre-pipeline'"
@@ -278,8 +279,8 @@ publish_web() {
   [ -s "$tmp/index.html" ] && [ -s "$tmp/admin.html" ] || { rm -rf "$tmp"; die "web bundle incomplete (index.html/admin.html)"; }
   mkdir -p "$FSP_WEB_ROOT"
   # assets first (hashed names, additive), HTML entry points last — open tabs keep their chunks
-  rsync -a --exclude '*.html' "$tmp/" "$FSP_WEB_ROOT/"
-  rsync -a --include '*.html' --exclude '*' "$tmp/" "$FSP_WEB_ROOT/"
+  rsync -a --chmod=D755,F644 --exclude '*.html' "$tmp/" "$FSP_WEB_ROOT/"
+  rsync -a --chmod=D755,F644 --include '*.html' --exclude '*' "$tmp/" "$FSP_WEB_ROOT/"
   find "$FSP_WEB_ROOT/assets" -type f -mtime +14 -delete 2>/dev/null || true
   rm -rf "$tmp"
   log "web published to $FSP_WEB_ROOT"
@@ -331,6 +332,7 @@ pull_images
 backup_db
 
 CHANGED=1
+touch "$FSP_HOME/.pipeline-started"   # from now on this stack is never snapshotted as pre-pipeline
 log "starting $FSP_PROJECT @ $RELEASE"
 compose up -d --pull never postgres
 wait_service postgres
