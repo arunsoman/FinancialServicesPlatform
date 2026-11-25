@@ -20,7 +20,7 @@ dependencies {
     implementation("com.tigerbeetle:tigerbeetle-java:0.17.9")
 
     // Cryptography for audit hashes / tokens
-    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.87")
 
     // Lombok: @Slf4j only (AGENTS.md §2b/§2c) — BOM-managed version
     compileOnly("org.projectlombok:lombok")
