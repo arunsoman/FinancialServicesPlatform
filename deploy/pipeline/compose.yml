@@ -160,7 +160,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fsp
       SPRING_DATASOURCE_USERNAME: fsp
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-      SPRING_APPLICATION_JSON: '{"server":{"servlet":{"session":{"cookie":{"secure":true}}}},"fsp":{"idp-issuer":"https://${FSP_AUTH_HOST}","login-redirect-uri":"https://${FSP_PUBLIC_HOST:?}/bff/auth/callback","authorize-url-base":"https://${FSP_AUTH_HOST}"}}'
+      SPRING_APPLICATION_JSON: '{"server":{"servlet":{"session":{"cookie":{"secure":true}}}},"fsp":{"allowed-origins":"https://${FSP_PUBLIC_HOST}","idp-issuer":"https://${FSP_AUTH_HOST}","login-redirect-uri":"https://${FSP_PUBLIC_HOST:?}/bff/auth/callback","authorize-url-base":"https://${FSP_AUTH_HOST}"}}'
     ports:
       - "127.0.0.1:${FSP_PORT_BFF:?}:8080"
     networks: [fsp]
