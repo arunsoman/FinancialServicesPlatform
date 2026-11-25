@@ -111,7 +111,7 @@ jobs:
           python3 deploy/pipeline/scripts/gen-plugins.py . /tmp/bundle
           cp deploy/pipeline/compose*.yml /tmp/bundle/
           cd /tmp/bundle
-          printf '%s=x\n' POSTGRES_PASSWORD FSP_BOOTSTRAP_PASSWORD FSP_INTERNAL_CREDENTIAL FSP_PERSON_PASSWORD \
+          printf '%s=x\n' POSTGRES_PASSWORD FSP_BOOTSTRAP_PASSWORD FSP_INTERNAL_CREDENTIAL FSP_INTERNAL_CREDENTIAL_IDP FSP_PERSON_PASSWORD \
             FSP_PLUGIN_KYC_DB_PASSWORD FSP_PLUGIN_INVENTORY_DB_PASSWORD FSP_PLUGIN_INVENTORY_KEK > /tmp/secrets.env
           . ./plugins.env
           for s in core idp gateway bff $FSP_PLUGINS; do echo "FSP_IMAGE_${s^^}=example/$s@sha256:$(printf %064d 0)"; done > /tmp/release.env

@@ -29,7 +29,7 @@ chmod 700 "$FSP_CONF_DIR" "$FSP_CONF_DIR/pki"
 # shellcheck source=lib-secrets.sh
 . "$HERE/scripts/lib-secrets.sh"
 [ -s "$FSP_CONF_DIR/.env" ] || (umask 077; echo "# FSP STAGING secrets — generated on $(hostname). Never copy to production." > "$FSP_CONF_DIR/.env")
-for n in POSTGRES_PASSWORD FSP_BOOTSTRAP_PASSWORD FSP_INTERNAL_CREDENTIAL FSP_PERSON_PASSWORD; do
+for n in POSTGRES_PASSWORD FSP_BOOTSTRAP_PASSWORD FSP_INTERNAL_CREDENTIAL FSP_INTERNAL_CREDENTIAL_IDP FSP_PERSON_PASSWORD; do
   ensure_env_secret "$FSP_CONF_DIR/.env" "$n"
 done
 log "staging signing keys (distinct from production)"

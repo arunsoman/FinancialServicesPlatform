@@ -63,12 +63,19 @@ compose() {
 }
 
 # ---------------------------------------------------------------------------------------------
-# Core keys + every plugin's DB password, extra secrets (deploy.json) and client/DPoP keys.
+# Platform secrets + keys and every plugin's DB password, extra secrets (deploy.json) and client/DPoP keys.
 # Staging (FSP_AUTOGEN_SECRETS=1) creates what is missing — e.g. for a newly added plugin.
 # Production never invents secrets: it stops and names what an operator must provision.
 ensure_plugin_secrets() {
   local missing=() k p n env="$FSP_CONF_DIR/.env" pki="$FSP_CONF_DIR/pki"
   for k in idp-signing gateway-assertion; do [ -s "$pki/$k.pem" ] || missing+=("key $k.pem"); done
+  # platform secrets — one internal credential per target service (core, idp)
+  for n in POSTGRES_PASSWORD FSP_BOOTSTRAP_PASSWORD FSP_PERSON_PASSWORD \
+           FSP_INTERNAL_CREDENTIAL FSP_INTERNAL_CREDENTIAL_IDP; do
+    if ! grep -q "^$n=" "$env"; then
+      if [ "$FSP_AUTOGEN_SECRETS" = 1 ]; then ensure_env_secret "$env" "$n"; else missing+=("secret $n"); fi
+    fi
+  done
   for p in "${PLUGINS[@]}"; do
     local u extra_var names extra
     u="$(upper "$p")"
@@ -191,6 +198,10 @@ running() { [ "$(docker inspect -f '{{.State.Running}}' "$(container "$1")" 2>/d
 snapshot_pre_pipeline() {
   [ -e "$FSP_HOME/current" ] && return 0
   running core || return 0
+  # only a HAND-MADE stack is adopted: containers left by an earlier (failed) pipeline deploy
+  # run pipeline images and are not a known-good state to return to
+  local img; img="$(docker inspect -f '{{.Config.Image}}' "$(container core)" 2>/dev/null || true)"
+  case "$img" in "${FSP_REGISTRY:-ghcr.io}"/*) return 0 ;; esac
   local snap="$FSP_HOME/releases/pre-pipeline"
   [ -d "$snap" ] && return 0
   log "no pipeline release yet — snapshotting the running stack as 'pre-pipeline'"
@@ -202,8 +213,8 @@ snapshot_pre_pipeline() {
     for svc in core idp gateway bff "${PLUGINS[@]/#/plugin-}"; do
       var="FSP_IMAGE_$(upper "${svc#plugin-}")"
       id="$(docker inspect -f '{{.Image}}' "$(container "$svc")" 2>/dev/null)" || continue   # plugin not deployed before
-      docker tag "$id" "fsp-pre-pipeline/$svc:snapshot"
-      echo "$var=fsp-pre-pipeline/$svc:snapshot"
+      docker tag "$id" "$FSP_PREFIX-pre-pipeline/$svc:snapshot"
+      echo "$var=$FSP_PREFIX-pre-pipeline/$svc:snapshot"
     done
     echo "FSP_WEB_SOURCE_DIR=$snap/web"
     echo "FSP_RELEASE_MAX_MIGRATION="
