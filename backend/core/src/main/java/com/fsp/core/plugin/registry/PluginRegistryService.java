@@ -16,8 +16,8 @@ import java.util.UUID;
 
 /**
  * Plugin type registration (vision §6.2): a plugin type + version is registered once,
- * platform-wide, under four-eyes. The manifest is hashed + stored verbatim.
- * On approval, the type becomes REGISTERED and its operations enter the signed catalog.
+ * platform-wide, in ONE STEP (AGENTS.md §2.1 easy install — no four-eyes). The manifest is
+ * hashed + stored verbatim; the type is REGISTERED and installed on the platform root at once.
  */
 @Slf4j
 @Service
@@ -28,20 +28,26 @@ public class PluginRegistryService {
     private final AuditService audit;
     private final OutboxService outbox;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private final com.fsp.core.plugin.installation.PluginAutoInstaller installer;
     private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public PluginRegistryService(PluginTypeRepository types, ApprovalService approvals,
                                  AuditService audit, OutboxService outbox,
-                                 org.springframework.jdbc.core.JdbcTemplate jdbc) {
+                                 org.springframework.jdbc.core.JdbcTemplate jdbc,
+                                 com.fsp.core.plugin.installation.PluginAutoInstaller installer) {
         this.types = types;
         this.approvals = approvals;
         this.audit = audit;
         this.outbox = outbox;
         this.jdbc = jdbc;
+        this.installer = installer;
     }
 
-    /** Submit a plugin type for registration (maker = caller). Four-eyes: the type is stored
-     *  PENDING_APPROVAL and a PLUGIN_REGISTER approval is opened. */
+    /**
+     * Register a plugin type — ONE STEP (AGENTS.md §2.1 easy install): no four-eyes. The type is
+     * REGISTERED at once, its machine client provisioned, and it is installed on the platform root
+     * (PluginAutoInstaller) so it serves every organization as soon as it reports ready.
+     */
     @Transactional
     public PluginType register(String code, String version, String baseUrl, String manifest,
                                String manifestHash, Actor actor) {
@@ -52,26 +58,14 @@ public class PluginRegistryService {
         PluginType type = new PluginType(UUID.randomUUID(), code, version, baseUrl, manifest, manifestHash,
             "PENDING_APPROVAL", actor.personId());
         types.save(type);
-
-        // Open four-eyes approval; the maker is the submitting person
-        ApprovalRequest row = approvals.open(
-            actor.activeTenantId(), ApprovalRequest.OpType.PLUGIN_REGISTER, type.id,
-            actor, actor.personId(),
-            "plugin.register %s@%s".formatted(code, version),
-            manifestHash);
-
-        audit.record(actor.personId(), null, actor.activeTenantId(), null,
-            "PLUGIN_REGISTER_SUBMITTED", "PLUGIN_TYPE", type.id.toString(),
-            null, audit.hashState("code=" + code + ";version=" + version + ";status=PENDING_APPROVAL"), false);
-        outbox.record("PluginType", type.id, "PluginType.Submitted",
-            "{\"code\":\"%s\",\"version\":\"%s\",\"maker\":\"%s\"}".formatted(code, version, actor.personId()));
-
-        log.info("plugin_register_submitted code={} version={} maker={} approvalId={}",
-            code, version, actor.personId(), row.id);
+        activate(type, actor);
+        String inst = installer.ensureOnPlatformRoot(code, version, actor.personId(), "manual");
+        log.info("plugin_registered_and_installed code={} version={} by={} installation={}",
+            code, version, actor.personId(), inst);
         return type;
     }
 
-    /** Called by the PLUGIN_REGISTER approval handler after the checker approves. */
+    /** A PLUGIN_REGISTER approval opened before easy install, approved now: same one step. */
     @Transactional
     public PluginType approve(String code, String version, Actor checker) {
         // the approved version, never "whichever pending row of this code comes first"
@@ -80,31 +74,37 @@ public class PluginRegistryService {
             .findFirst()
             .orElseThrow(() -> ApiException.notFound("PLUGIN_TYPE_NOT_PENDING",
                 "Plugin type %s@%s is not pending approval".formatted(code, version)));
+        activate(type, checker);
+        installer.ensureOnPlatformRoot(code, type.version, checker.personId(), "legacy-approval");
+        return type;
+    }
+
+    private void activate(PluginType type, Actor actor) {
+        String code = type.code;
+        String version = type.version;
         // One REGISTERED version per code: the gateway's routes, the manifest's declared
         // approvals and its grants are read per code, so an older registration is superseded
         // (DEACTIVATED) in the same transaction. Installations are per code and keep running.
         for (PluginType older : types.findByCodeAndStatus(code, "REGISTERED")) {
             older.status = "DEACTIVATED";
             types.save(older);
-            audit.record(null, checker.personId(), checker.activeTenantId(), null,
+            audit.record(actor.personId(), null, actor.activeTenantId(), null,
                 "PLUGIN_SUPERSEDED", "PLUGIN_TYPE", older.id.toString(),
-                null, audit.hashState("code=" + code + ";version=" + older.version + ";supersededBy=" + type.version), false);
-            log.info("plugin_superseded code={} version={} by={}", code, older.version, type.version);
+                null, audit.hashState("code=" + code + ";version=" + older.version + ";supersededBy=" + version), false);
+            log.info("plugin_superseded code={} version={} by={}", code, older.version, version);
         }
         type.status = "REGISTERED";
-        type.approvedBy = checker.personId();
+        type.approvedBy = actor.personId();
         type.approvedAt = Instant.now();
         types.save(type);
-        provisionMachineClient(type, checker.activeTenantId(), checker.personId());
+        provisionMachineClient(type, actor.activeTenantId(), actor.personId());
 
-        audit.record(null, checker.personId(), checker.activeTenantId(), null,
+        audit.record(actor.personId(), null, actor.activeTenantId(), null,
             "PLUGIN_REGISTERED", "PLUGIN_TYPE", type.id.toString(),
             null, audit.hashState("code=" + code + ";version=" + version + ";status=REGISTERED"), false);
         outbox.record("PluginType", type.id, "PluginType.Registered",
-            "{\"code\":\"%s\",\"version\":\"%s\",\"checker\":\"%s\"}".formatted(code, version, checker.personId()));
-
-        log.info("plugin_registered code={} version={} checker={}", code, version, checker.personId());
-        return type;
+            "{\"code\":\"%s\",\"version\":\"%s\",\"by\":\"%s\"}".formatted(code, version, actor.personId()));
+        log.info("plugin_registered code={} version={} by={}", code, version, actor.personId());
     }
 
     /**

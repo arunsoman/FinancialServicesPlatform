@@ -1,4 +1,4 @@
-/** plugins.governance — plugin types + installations (GAP-4); writes are four-eyes requests. */
+/** plugins.governance — plugin types + installations (GAP-4); register / install are one step (AGENTS.md §2.1 easy install). */
 import { defineWidget } from '../../core/manifest';
 import { span } from '../../core/grid';
 import { PluginsGovernance } from './widget';
@@ -15,7 +15,7 @@ const pluginsGovernanceWidget = defineWidget({
   commands: ['plugins.governance.register', 'plugins.governance.install'],
   actions: [
     { id: 'plugin.register', label: 'Register plugin', cell: 'plugin.register', command: 'plugins.governance.register', kind: 'primary' },
-    { id: 'plugin.install', label: 'Request installation', cell: 'plugin.install', command: 'plugins.governance.install', kind: 'primary' },
+    { id: 'plugin.install', label: 'Install', cell: 'plugin.install', command: 'plugins.governance.install', kind: 'primary' },
   ],
   commandOperations: { 'plugins.governance.register': 'create', 'plugins.governance.install': 'create' },
   size: { xs: span.xs(4), sm: span.sm(8), md: span.md(12), lg: span.lg(12) },

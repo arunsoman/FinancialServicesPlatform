@@ -111,11 +111,11 @@ export const fixtures: FixtureSet = {
     error: null,
   },
   'plugins.governance.register': {
-    // Four-eyes: the request is STAGED; the type turns REGISTERED after a checker approves.
+    // Easy install: registering is one step — REGISTERED (and installed) at once.
     default: (req: FixtureRequest) => {
       forbidUnless(req.permissions, 'plugin.register');
       const m = JSON.parse(String((req.body as { manifest?: string }).manifest ?? '{}')) as { code?: string; version?: string };
-      return { code: m.code ?? 'unknown', version: m.version ?? '0.0.0', status: 'PENDING_APPROVAL' };
+      return { code: m.code ?? 'unknown', version: m.version ?? '0.0.0', status: 'REGISTERED' };
     },
     error: null,
   },
@@ -123,7 +123,7 @@ export const fixtures: FixtureSet = {
     default: (req: FixtureRequest) => {
       forbidUnless(req.permissions, 'plugin.install');
       const b = req.body as { code?: string; version?: string };
-      return { code: b.code ?? 'unknown', version: b.version ?? '0.0.0', status: 'PENDING_APPROVAL' };
+      return { code: b.code ?? 'unknown', version: b.version ?? '0.0.0', status: 'PROVISIONING' };
     },
     error: null,
   },

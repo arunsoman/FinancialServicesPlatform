@@ -577,10 +577,16 @@ public class ForwardFilterConfig {
                     .uri(props.getCoreBaseUrl() + "/internal/plugins/" + op.code() + "/effective?tenantId=" + tenantId)
                     .header("X-FSP-Internal-Credential", props.getInternalCredential())
                     .retrieve().toEntity(String.class);
-                if (ready.getBody() == null || !mapper.readTree(ready.getBody()).path("applies").asBoolean(false)) {
-                    log.warn("gateway_plugin_not_ready path={} plugin={} tenant={}", path, op.code(), tenantId);
-                    problem(response, 503, "PLUGIN_NOT_READY",
-                        "Plugin " + op.code() + " is not enabled for this organization");
+                JsonNode eff = mapper.readTree(ready.getBody() == null ? "{}" : ready.getBody());
+                if (!eff.path("applies").asBoolean(false)) {
+                    // Core says why (NOT_INSTALLED, PENDING_APPROVAL, PROVISIONING, ...): log it and
+                    // hand the person core's sentence, never a guess.
+                    String reason = eff.path("reason").asText("UNKNOWN");
+                    String detail = eff.path("detail").asText("");
+                    log.warn("gateway_plugin_not_ready path={} plugin={} tenant={} reason={} detail={}",
+                        path, op.code(), tenantId, reason, detail);
+                    problem(response, 503, "PLUGIN_NOT_READY", detail.isBlank()
+                        ? "Plugin " + op.code() + " is not enabled for this organization" : detail);
                     return false;
                 }
             } catch (Exception e) {

@@ -29,8 +29,11 @@ class PluginRegistrySupersedeTest {
     private static final String MANIFEST = "{\"client\":{\"jwks\":{\"keys\":[{\"kty\":\"EC\",\"x\":\"a\",\"y\":\"b\"}]},\"grants\":[]}}";
     private final PluginTypeRepository types = mock(PluginTypeRepository.class);
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    private final PluginRegistryService service = new PluginRegistryService(types, mock(ApprovalService.class),
-        mock(AuditService.class), mock(OutboxService.class), jdbc);
+    private final ApprovalService approvals = mock(ApprovalService.class);
+    private final com.fsp.core.plugin.installation.PluginAutoInstaller installer =
+        mock(com.fsp.core.plugin.installation.PluginAutoInstaller.class);
+    private final PluginRegistryService service = new PluginRegistryService(types, approvals,
+        mock(AuditService.class), mock(OutboxService.class), jdbc, installer);
     private final Actor checker = new Actor(UUID.randomUUID(), "checker", UUID.randomUUID());
 
     private PluginType type(String version, String status) {
@@ -63,5 +66,19 @@ class PluginRegistrySupersedeTest {
         assertEquals("REGISTERED", wanted.status);
         assertEquals("PENDING_APPROVAL", other.status);
         assertThrows(ApiException.class, () -> service.approve("kyc", "9.9.9", checker));
+    }
+
+    @Test
+    void manualRegistrationIsOneStepRegisteredAndInstalledWithNoApproval() {
+        // AGENTS.md §2.1 easy install: no four-eyes, no second person, no second day
+        when(types.existsByCodeAndVersion("kyc", "1.2.0")).thenReturn(false);
+        when(types.findByCodeAndStatus("kyc", "REGISTERED")).thenReturn(List.of());
+        when(jdbc.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(1);
+
+        PluginType t = service.register("kyc", "1.2.0", "http://plugin-kyc:8083", MANIFEST, "h", checker);
+
+        assertEquals("REGISTERED", t.status);
+        org.mockito.Mockito.verify(installer).ensureOnPlatformRoot("kyc", "1.2.0", checker.personId(), "manual");
+        org.mockito.Mockito.verifyNoInteractions(approvals);
     }
 }

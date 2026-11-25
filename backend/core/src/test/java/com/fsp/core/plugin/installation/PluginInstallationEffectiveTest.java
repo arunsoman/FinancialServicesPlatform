@@ -179,6 +179,69 @@ class PluginInstallationEffectiveTest {
         assertThat(result.origin()).isEqualTo("NONE");
     }
 
+    // ---- why a plugin does not apply (staging 2026-11-25: registered on deploy, installed
+    //      nowhere, and the screen claimed it "finishes setting up on its own")
+
+    private void registered(String code) {
+        when(types.findByCodeAndStatus(code, "REGISTERED"))
+            .thenReturn(List.of(mock(com.fsp.core.plugin.registry.PluginType.class)));
+    }
+
+    private PluginInstallation row(UUID tenantId, String status) {
+        PluginInstallation inst = new PluginInstallation();
+        inst.id = UUID.randomUUID();
+        inst.pluginCode = "kyc";
+        inst.tenantId = tenantId;
+        inst.status = status;
+        inst.inheritancePolicy = "INHERIT";
+        return inst;
+    }
+
+    @Test
+    void registeredButInstalledNowhereSaysNotInstalled() {
+        mockChain(ROOT, PSP, CHILD);
+        registered("kyc");
+        var why = service.whyNot("kyc", CHILD, service.effective("kyc", CHILD));
+        assertThat(why.reason()).isEqualTo("NOT_INSTALLED");
+        assertThat(why.detail()).contains("not installed").contains("Plugins");
+    }
+
+    @Test
+    void anInstallationOnAnotherBranchDoesNotCount() {
+        mockChain(ROOT, PSP, CHILD);
+        registered("kyc");
+        when(installations.findByPluginCode("kyc")).thenReturn(List.of(row(UUID.randomUUID(), "ACTIVE")));
+        assertThat(service.whyNot("kyc", CHILD, service.effective("kyc", CHILD)).reason()).isEqualTo("NOT_INSTALLED");
+    }
+
+    @Test
+    void awaitingTheCheckerSaysPendingApproval() {
+        mockChain(ROOT, PSP, CHILD);
+        registered("kyc");
+        when(installations.findByPluginCode("kyc")).thenReturn(List.of(row(PSP, "PENDING_APPROVAL")));
+        assertThat(service.whyNot("kyc", CHILD, service.effective("kyc", CHILD)).reason()).isEqualTo("PENDING_APPROVAL");
+    }
+
+    @Test
+    void provisioningNamesTheGatesStillPending() {
+        mockChain(ROOT, CHILD);
+        registered("kyc");
+        PluginInstallation inst = row(CHILD, "PROVISIONING");
+        when(installations.findByPluginCode("kyc")).thenReturn(List.of(inst));
+        when(gates.findByInstallationId(inst.id)).thenReturn(List.of(
+            new PluginInstallationGate(inst.id, "CLIENT_ACTIVE", "ACTIVE"),
+            new PluginInstallationGate(inst.id, "SECRETS_PROVISIONED", "PENDING")));
+        var why = service.whyNot("kyc", CHILD, service.effective("kyc", CHILD));
+        assertThat(why.reason()).isEqualTo("PROVISIONING");
+        assertThat(why.detail()).contains("SECRETS_PROVISIONED").doesNotContain("CLIENT_ACTIVE");
+    }
+
+    @Test
+    void unregisteredTypeSaysNotRegistered() {
+        mockChain(CHILD);
+        assertThat(service.whyNot("kyc", CHILD, service.effective("kyc", CHILD)).reason()).isEqualTo("NOT_REGISTERED");
+    }
+
     @Test
     void unknownTenantThrows() {
         when(tenants.findById(any())).thenReturn(Optional.empty());
