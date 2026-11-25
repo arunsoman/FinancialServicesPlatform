@@ -1,6 +1,8 @@
 package com.fsp.core.plugin.registry;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fsp.core.common.ApiException;
 import com.fsp.core.config.FspProperties;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,6 +25,9 @@ import java.util.Map;
  * release credential, which only the deploy holds — the gateway and BFF never see it, so a caller
  * that can reach core's internal plane still cannot register a plugin. Never routed by the gateway.
  *
+ * The body is taken as text and parsed here, after the credential check: core's message converter
+ * is Jackson 3 and cannot build the Jackson 2 JsonNode the lifecycle service works with.
+ *
  * Body: { release, provenance: {commit, pr, author, reviewers[], deployApprovers[], ...},
  *         suspendMissing, plugins: [{code, version, baseUrl, manifest}] }
  */
@@ -31,6 +36,7 @@ import java.util.Map;
 public class PluginReleaseController {
 
     static final String RELEASE_CREDENTIAL = "X-FSP-Release-Credential";
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final PluginLifecycleService lifecycle;
     private final FspProperties props;
@@ -41,7 +47,7 @@ public class PluginReleaseController {
     }
 
     @PostMapping("/internal/release/plugins")
-    public Map<String, Object> reconcile(HttpServletRequest request, @RequestBody JsonNode body) {
+    public Map<String, Object> reconcile(HttpServletRequest request, @RequestBody String rawBody) {
         String expected = props.getSecurity().getReleaseCredential();
         if (expected == null || expected.isBlank()) {
             log.warn("plugin_release_closed reason=credential_not_configured");
@@ -52,6 +58,12 @@ public class PluginReleaseController {
                 expected.getBytes(StandardCharsets.UTF_8))) {
             log.warn("plugin_release_refused remote={} state={}", request.getRemoteAddr(), given == null ? "missing" : "mismatch");
             throw ApiException.unauthorized("RELEASE_CREDENTIAL_INVALID", "missing or invalid release credential");
+        }
+        JsonNode body;
+        try {
+            body = MAPPER.readTree(rawBody);
+        } catch (JsonProcessingException e) {
+            throw ApiException.badRequest("RELEASE_BODY_INVALID", "release body is not valid JSON");
         }
         List<PluginLifecycleService.DesiredPlugin> desired = new ArrayList<>();
         for (JsonNode p : body.path("plugins")) {
