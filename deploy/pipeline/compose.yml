@@ -76,7 +76,10 @@ services:
       SPRING_DATASOURCE_USERNAME: fsp
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       FSP_BOOTSTRAP_PASSWORD: ${FSP_BOOTSTRAP_PASSWORD:?}
-      FSP_INTERNAL_CREDENTIAL: ${FSP_INTERNAL_CREDENTIAL:?}
+      # one internal credential per TARGET service (per-target secrets, red-team P0 fix)
+      FSP_INTERNAL_CREDENTIAL: ${FSP_INTERNAL_CREDENTIAL:?}          # core's own internal plane
+      FSP_INTERNAL_CREDENTIAL_IDP: ${FSP_INTERNAL_CREDENTIAL_IDP:?}  # core → idp hop
+      FSP_IDP_URL: http://idp:8082
       FSP_PERSON_PASSWORD: ${FSP_PERSON_PASSWORD:?}
       SPRING_APPLICATION_JSON: '{"fsp":{"tigerbeetle":{"addresses":"${FSP_TB_IP}:3000"},"gateway":{"actor-jwks-url":"http://gateway:8090/.well-known/fsp-actor-jwks"}}}'
     volumes:
@@ -103,7 +106,7 @@ services:
       FSP_DB_PASSWORD: ${POSTGRES_PASSWORD}
       FSP_IDP_ISSUER: https://${FSP_AUTH_HOST:?}
       FSP_IDP_SIGNING_KEY: /opt/fsp/pki/idp-signing.pem
-      FSP_INTERNAL_CREDENTIAL: ${FSP_INTERNAL_CREDENTIAL}
+      FSP_INTERNAL_CREDENTIAL_IDP: ${FSP_INTERNAL_CREDENTIAL_IDP:?}  # idp's own internal plane
     volumes:
       - ${FSP_CONF_DIR}/pki:/opt/fsp/pki:ro
     ports:
@@ -127,7 +130,8 @@ services:
       FSP_CORE_URL: http://core:8081
       FSP_IDP_URL: http://idp:8082
       FSP_IDP_ISSUER: https://${FSP_AUTH_HOST}
-      FSP_INTERNAL_CREDENTIAL: ${FSP_INTERNAL_CREDENTIAL}
+      FSP_INTERNAL_CREDENTIAL_CORE: ${FSP_INTERNAL_CREDENTIAL:?}     # gateway → core (= core's own secret)
+      FSP_INTERNAL_CREDENTIAL_IDP: ${FSP_INTERNAL_CREDENTIAL_IDP:?}  # gateway → idp
       SPRING_APPLICATION_JSON: '{"fsp":{"gateway":{"assertion-key":"/opt/fsp/pki/gateway-assertion.pem","assertion-key-create":false}}}'
     volumes:
       - ${FSP_CONF_DIR}/pki:/opt/fsp/pki:ro
