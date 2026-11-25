@@ -2,10 +2,13 @@
 spring:
   application:
     name: fsp-bff
+  # Sessions in Postgres (spring-boot-starter-session-jdbc) so they survive a BFF restart / deploy.
+  # Server-side only (FAPI 2.0: tokens + DPoP key never reach the browser); the table is created
+  # by Spring Session on first start.
   session:
-    store-type: jdbc
     jdbc:
       initialize-schema: always
+      cleanup-cron: "0 */5 * * * *"
   datasource:
     url: jdbc:postgresql://localhost:5432/fsp
     username: fsp

@@ -8,7 +8,8 @@ public final class BffDtos {
     /** Mirrors core's AuthService.UserSummary; stored server-side in the session only. */
     public record SessionUser(String userId, String username, String fullName, String tenantId,
                               String tenantName, String tenantType, String tenantSubType,
-                              String tenantStatus, boolean applicant, java.util.List<String> roles) {}
+                              String tenantStatus, boolean applicant, java.util.List<String> roles)
+        implements java.io.Serializable {}
 
     public record LoginRequest(String username, String password) {}
 
