@@ -66,6 +66,8 @@
 | plugin.installation.provisioning | —(owner-scoped) | — | `PluginProvisioningController.java` |
 | plugin.installation.ready | —(owner-scoped) | — | `PluginInstallationController.java` |
 | plugin.register | —(owner-scoped) | — | `PluginRegistryController.java` |
+| plugin.resume | —(owner-scoped) | — | `PluginRegistryController.java` |
+| plugin.suspend | —(owner-scoped) | — | `PluginRegistryController.java` |
 | plugin.type.get | —(owner-scoped) | — | `PluginRegistryController.java` |
 | plugin.type.list | —(owner-scoped) | — | `PluginGovernanceController.java` |
 | rbac.menu.me | —(owner-scoped) | — | `RbacController.java` |

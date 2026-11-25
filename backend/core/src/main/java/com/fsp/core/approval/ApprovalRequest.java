@@ -46,6 +46,9 @@ public class ApprovalRequest {
         /** Plugin platform op types pass through via the PLUGIN: prefix (canonicalOpType). */
         public static final String PLUGIN_REGISTER = "PLUGIN_REGISTER";
         public static final String PLUGIN_INSTALL = "PLUGIN_INSTALL";
+        /** Take a registered plugin out of service / back in (Grafana › Plugins); checker needs plugin.manage. */
+        public static final String PLUGIN_SUSPEND = "PLUGIN_SUSPEND";
+        public static final String PLUGIN_RESUME = "PLUGIN_RESUME";
         public static final String GENERIC = "GENERIC";
     }
 

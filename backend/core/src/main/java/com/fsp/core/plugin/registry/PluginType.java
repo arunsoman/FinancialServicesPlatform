@@ -39,7 +39,8 @@ public class PluginType {
     @Column(nullable = false)
     public String status; // PENDING_APPROVAL | REGISTERED | SUSPENDED | DEACTIVATED
 
-    @Column(nullable = false)
+    /** The maker (person) of an APPROVAL registration; null for a RELEASE registration, whose
+     *  people (PR author, reviewers, deploy approvers) are in {@link #provenance}. */
     public UUID registeredBy;
 
     public Instant registeredAt = Instant.now();
@@ -47,6 +48,26 @@ public class PluginType {
     public UUID approvedBy;
 
     public Instant approvedAt;
+
+    /** APPROVAL (maker + checker in FSP) | RELEASE (shipped as code, docs/plugin-registration.md). */
+    @Column(nullable = false)
+    public String registeredVia = "APPROVAL";
+
+    /** Release that registered this version (RELEASE rows). */
+    public String releaseRef;
+
+    /** Who reviewed and approved the release (RELEASE rows): commit, PR, author, reviewers, deploy approvers. */
+    @Column(columnDefinition = "JSONB")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    public String provenance;
+
+    /** Checker of the PLUGIN_SUSPEND approval (PERSON) — null when a release suspended it. */
+    public UUID suspendedBy;
+
+    public Instant suspendedAt;
+
+    /** PERSON: four-eyes suspension, a deploy never lifts it | RELEASE: the plugin left the repo. */
+    public String suspendedReason;
 
     @Version
     @Column(name = "row_version")

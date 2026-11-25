@@ -522,6 +522,11 @@ public class ForwardFilterConfig {
         private boolean admitToPlugin(CatalogRouteTable.PluginOp op, JwtService.Claims claims, String method,
                                       String path, String trace, HttpServletResponse response,
                                       HttpHeaders upstream, String actAsHeader) throws IOException {
+            if (op.suspended()) {   // taken out of service under four-eyes — data kept, nothing forwarded (plan I10)
+                log.warn("gateway_plugin_suspended path={} plugin={}", path, op.code());
+                problem(response, 503, "PLUGIN_SUSPENDED", "Plugin " + op.code() + " is suspended by the platform");
+                return false;
+            }
             String tenantId = claims.tenantId();
             // Act-as (plans/act-as-tenant-plan.md): a person acting as a tenant works on plugins AS that
             // tenant. Core — the only owner of act-as sessions — resolves it for the VERIFIED person;

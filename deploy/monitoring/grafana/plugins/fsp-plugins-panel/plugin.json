@@ -1,0 +1,14 @@
+{
+  "type": "panel",
+  "name": "FSP plugins",
+  "id": "fsp-plugins-panel",
+  "info": {
+    "description": "Register, suspend and resume FSP plugins and decide their four-eyes approvals — through the BFF session, decided by core.",
+    "author": { "name": "FSP" },
+    "keywords": ["fsp", "plugins"],
+    "logos": { "small": "img/logo.svg", "large": "img/logo.svg" },
+    "version": "1.0.0",
+    "updated": "2026-11-25"
+  },
+  "dependencies": { "grafanaDependency": ">=12.0.0", "plugins": [] }
+}

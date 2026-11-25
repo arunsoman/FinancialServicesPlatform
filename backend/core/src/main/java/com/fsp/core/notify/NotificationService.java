@@ -462,7 +462,7 @@ public class NotificationService {
                 "user management change";
             case "ROLE_CREATE", "ROLE_UPDATE", "ROLE_DELETE" -> "role change";
             case "UI_LAYOUT_PUBLISH" -> "portal layout publish";
-            case "PLUGIN_REGISTER", "PLUGIN_INSTALL" -> "plugin lifecycle change";
+            case "PLUGIN_REGISTER", "PLUGIN_INSTALL", "PLUGIN_SUSPEND", "PLUGIN_RESUME" -> "plugin lifecycle change";
             default -> opType.toLowerCase().replace('_', ' ');
         };
     }

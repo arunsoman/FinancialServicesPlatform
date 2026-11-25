@@ -2,7 +2,8 @@
 # first time by scripts/monitor-bootstrap.sh. Isolated + capped like staging:
 #   own project/containers/network, loopback-only ports, all inside fsp-monitor.slice
 #   (MemoryMax 2 GiB, CPUQuota 100%, lowest CPU/IO weight), OOM-killed before anything else.
-# Budget (sum of ceilings): 1.875 GiB RAM, 2.0 CPUs (slice caps the total at 2 GiB / 1 CPU).
+# Budget (sum of ceilings): 1.875 GiB RAM, 2.0 CPUs (slice caps the total at 2 GiB / 1 CPU);
+# + 512 MiB / 0.5 CPU when the production Grafana is enabled (raise the slice then).
 
 x-caps: &caps
   restart: unless-stopped
@@ -76,33 +77,54 @@ services:
     memswap_limit: 384m
     depends_on: [loki, prometheus]
 
-  grafana:
+  # ONE Grafana PER ENVIRONMENT — the environment's ops console at https://<env host>/ops/.
+  # FAPI 2.0: Grafana never talks to the IdP and holds no token. nginx asks the environment's BFF
+  # (/bff/ops/auth) who is signed in and passes ONLY that name (auth proxy, accepted from the host
+  # address alone); actions in the FSP plugins panel are the person's own BFF calls, decided by core.
+  grafana-staging: &grafana
     <<: *caps
     image: grafana/grafana:13.3.1
     container_name: fsp-monitor-grafana
     user: "${FSP_UID}:${FSP_GID}"
-    environment:
-      GF_SERVER_ROOT_URL: https://${GRAFANA_HOST:?}/
-      GF_SERVER_DOMAIN: ${GRAFANA_HOST}
+    environment: &grafana-env
+      GF_SERVER_ROOT_URL: https://${GRAFANA_STAGING_HOST:?}/ops/
+      GF_SERVER_DOMAIN: ${GRAFANA_STAGING_HOST}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
       GF_SECURITY_COOKIE_SECURE: "true"
-      GF_SECURITY_COOKIE_SAMESITE: lax
+      GF_SECURITY_COOKIE_SAMESITE: strict
       GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_SECURITY_ANGULAR_SUPPORT_ENABLED: "false"
+      # signed-in person ← nginx ← BFF session (never from the browser: nginx overwrites the header)
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: X-WEBAUTH-USER
+      GF_AUTH_PROXY_HEADER_PROPERTY: username
+      GF_AUTH_PROXY_HEADERS: "Name:X-WEBAUTH-NAME"
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN: "false"
+      GF_AUTH_PROXY_WHITELIST: ${FSP_MON_HOST_IP:?}
+      GF_AUTH_DISABLE_SIGNOUT_MENU: "true"        # sign out in the portal: the session is the BFF's
+      GF_AUTH_LOGIN_MAXIMUM_INACTIVE_LIFETIME_DURATION: 15m
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Viewer       # look + act through the panel; no Explore, no editing
+      GF_USERS_VIEWERS_CAN_EDIT: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
       GF_NEWS_NEWS_FEED_ENABLED: "false"
-      # no plugin downloads from grafana.com at start-up; only Prometheus + Loki are needed
+      # no plugin downloads from grafana.com; the only unsigned plugin allowed is our own panel
       GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: fsp-plugins-panel
+      GF_PATHS_PLUGINS: /etc/grafana/fsp-plugins
       GF_PLUGINS_DISABLE_PLUGINS: cloudwatch,grafana-postgresql-datasource,grafana-pyroscope-datasource,jaeger,mssql,mysql,opentsdb,zipkin,elasticsearch,stackdriver,influxdb,grafana-azure-monitor-datasource,graphite,tempo,parca,grafana-testdata-datasource
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/fsp-releases.json
       FSP_GITHUB_REPO: ${GITHUB_REPO:?}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - ${FSP_MON_HOME}/dashboards/staging:/etc/grafana/dashboards:ro    # rendered by monitor-up.sh
+      - ./grafana/plugins:/etc/grafana/fsp-plugins:ro
       - ${FSP_MON_HOME}/data/grafana:/var/lib/grafana
     ports:
       - "127.0.0.1:${GRAFANA_PORT:?}:3000"
@@ -110,6 +132,22 @@ services:
     mem_limit: 512m        # measured 370 MiB working set after start — 384m left no headroom
     memswap_limit: 512m
     depends_on: [loki, prometheus]
+
+  grafana-production:
+    <<: *grafana
+    container_name: fsp-monitor-grafana-production
+    profiles: [production]    # started only when GRAFANA_PRODUCTION_ENABLED=1 (monitor-up.sh)
+    environment:
+      <<: *grafana-env
+      GF_SERVER_ROOT_URL: https://${GRAFANA_PRODUCTION_HOST:?}/ops/
+      GF_SERVER_DOMAIN: ${GRAFANA_PRODUCTION_HOST}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${FSP_MON_HOME}/dashboards/production:/etc/grafana/dashboards:ro
+      - ./grafana/plugins:/etc/grafana/fsp-plugins:ro
+      - ${FSP_MON_HOME}/data/grafana-production:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PRODUCTION_PORT:?}:3000"
 
 networks:
   mon:

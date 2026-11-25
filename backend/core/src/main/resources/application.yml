@@ -33,6 +33,8 @@ fsp:
     internal-credential: ${FSP_INTERNAL_CREDENTIAL:}
     # Outbound hop core→EMI carries EMI's secret (per-target credentials, red-team P0 fix)
     emi-internal-credential: ${FSP_INTERNAL_CREDENTIAL_EMI:}
+    # deploy → core: register the plugins a release ships (blank = endpoint closed)
+    release-credential: ${FSP_RELEASE_CREDENTIAL:}
     default-person-password: ${FSP_PERSON_PASSWORD:fsp-person-2026}
   tigerbeetle:
     cluster-id: 0

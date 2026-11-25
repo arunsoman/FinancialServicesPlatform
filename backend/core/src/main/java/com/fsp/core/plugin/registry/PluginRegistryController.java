@@ -24,12 +24,14 @@ public class PluginRegistryController {
     private final PluginRegistryService service;
     private final PluginTypeRepository types;
     private final PermissionService permissions;
+    private final PluginLifecycleService lifecycle;
 
     public PluginRegistryController(PluginRegistryService service, PluginTypeRepository types,
-                                    PermissionService permissions) {
+                                    PermissionService permissions, PluginLifecycleService lifecycle) {
         this.service = service;
         this.types = types;
         this.permissions = permissions;
+        this.lifecycle = lifecycle;
     }
 
     @FspOperation(id = "plugin.register", component = "platform", permission = "plugin.register",
@@ -56,6 +58,32 @@ public class PluginRegistryController {
 
     // No direct "approve" endpoint: a registration is approved ONLY through the four-eyes approval
     // (PluginRegisterApprovalHandler → service.approve), never by a second route.
+
+    @FspOperation(id = "plugin.suspend", component = "platform", permission = "plugin.register",
+        risk = FspOperation.OperationRisk.FOUR_EYES,
+        title = "Take a plugin out of service (four-eyes)",
+        actors = {Actor.ActorType.PERSON})
+    @PostMapping("/{code}/suspend")
+    public Map<String, Object> suspend(HttpServletRequest request, @PathVariable("code") String code,
+                                       @RequestBody(required = false) Map<String, Object> body) {
+        Actor actor = actor(request);
+        permissions.require(actor, "plugin.register", actor.activeTenantId());
+        var row = lifecycle.submitSuspend(code, body == null ? null : asString(body.get("note")), actor);
+        return Map.of("approvalId", row.id, "status", row.status, "operationType", row.operationType);
+    }
+
+    @FspOperation(id = "plugin.resume", component = "platform", permission = "plugin.register",
+        risk = FspOperation.OperationRisk.FOUR_EYES,
+        title = "Put a suspended plugin back in service (four-eyes)",
+        actors = {Actor.ActorType.PERSON})
+    @PostMapping("/{code}/resume")
+    public Map<String, Object> resume(HttpServletRequest request, @PathVariable("code") String code,
+                                      @RequestBody(required = false) Map<String, Object> body) {
+        Actor actor = actor(request);
+        permissions.require(actor, "plugin.register", actor.activeTenantId());
+        var row = lifecycle.submitResume(code, body == null ? null : asString(body.get("note")), actor);
+        return Map.of("approvalId", row.id, "status", row.status, "operationType", row.operationType);
+    }
 
     @FspOperation(id = "plugin.type.get", component = "platform", permission = "plugin.manage",
         risk = FspOperation.OperationRisk.READ, title = "Read a plugin type",

@@ -39,6 +39,7 @@ timeline
     V41 : invoices
     V42 : drop signed portal delivery
     V43 : idp refresh tokens
+    V44 : plugin release registration
 
-**Next free migration number: V44.**
+**Next free migration number: V45.**
 ```

@@ -11,17 +11,19 @@ Writes Prometheus textfile metrics (shown in Grafana → "FSP releases & plugins
 and, per environment, the EXACT manifest to register for each shipped plugin version:
     $FSP_MANIFEST_ROOT/<env>/<code>-<version>.json   = committed manifest + this environment's
                                                        live public key (client.jwks)
-Registration itself stays a human four-eyes act in the admin portal (AGENTS.md §2.1 —
-machine actors are never maker or checker). This script only says what is waiting.
+Registration: the deploy registers what a release ships (register-plugins.py — plugins ship as
+code, docs/plugin-registration.md); people suspend / resume / register by hand under four-eyes in
+the environment's ops console (Grafana › Plugins). This script only reports.
 """
 import hashlib
 import json
 import os
 import pathlib
 import re
-import subprocess
 import sys
 import time
+
+from plugin_manifests import base_url as plugin_base_url, bundle_config, expected_manifest, manifest_text, read_env, sh
 
 DRIFT_HELP = {
     "in_sync": "registered manifest == shipped manifest (with this environment's key)",
@@ -32,26 +34,8 @@ DRIFT_HELP = {
     "content_mismatch": "same version number, different content",
     "pending_approval": "the shipped version is waiting for the checker",
     "plugin_down": "plugin process not reachable — cannot read its key",
+    "suspended": "taken out of service under four-eyes — gateway answers 503; resume in Grafana › Plugins",
 }
-
-
-def read_env(path: pathlib.Path) -> dict:
-    env = {}
-    if not path.is_file():
-        return env
-    for line in path.read_text().splitlines():
-        m = re.match(r"^([A-Z0-9_]+)=(.*)$", line.strip())
-        if m:
-            env[m.group(1)] = m.group(2).strip().strip('"')
-    return env
-
-
-def sh(args: list[str], timeout: int = 20) -> str | None:
-    try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-        return r.stdout if r.returncode == 0 else None
-    except (subprocess.TimeoutExpired, OSError):
-        return None
 
 
 def vtuple(v: str) -> tuple:
@@ -111,7 +95,8 @@ def drift_metrics(bundle: pathlib.Path, cfg: dict, env: str) -> tuple[list[str],
 
     raw = sh(["docker", "exec", f"{prefix}-postgres", "psql", "-U", "fsp", "-d", "fsp", "-Atc",
               "select coalesce(json_agg(json_build_object('code',code,'version',version,'status',status,"
-              "'manifest',manifest)),'[]') from plugin_types where status in ('REGISTERED','PENDING_APPROVAL')"])
+              "'manifest',manifest,'via',registered_via)),'[]') from plugin_types "
+              "where status in ('REGISTERED','PENDING_APPROVAL','SUSPENDED')"])
     rows = json.loads(raw) if raw else None
 
     metrics = ["# HELP fsp_plugin_drift 0 = registered manifest equals the shipped one; 1 = action needed (see state).",
@@ -122,16 +107,11 @@ def drift_metrics(bundle: pathlib.Path, cfg: dict, env: str) -> tuple[list[str],
                "# TYPE fsp_plugin_manifest_available gauge"]
     summary = []
     for code in plugins:
-        shipped = json.loads((bundle / "plugins" / f"{code}.manifest.json").read_text())
+        shipped, expected = expected_manifest(bundle, cfg, code)
         version = shipped.get("version", "")
-        port = cfg.get(f"FSP_PLUGIN_{code.upper()}_PORT", "")
-        live = sh(["docker", "exec", f"{prefix}-plugin-{code}", "wget", "-qO-", "-T", "5",
-                   f"http://127.0.0.1:{port}/.well-known/jwks.json"])
         url, sha, state, unrouted = "", "", "plugin_down", 0
-        if live:
-            expected = dict(shipped)
-            expected["client"] = dict(shipped.get("client", {}), jwks=json.loads(live))
-            text = json.dumps(expected, indent=2, ensure_ascii=False) + "\n"
+        if expected is not None:
+            text = manifest_text(expected)
             sha = hashlib.sha256(text.encode()).hexdigest()
             name = f"{code}-{version}.json"
             write_atomic(root / name, text)
@@ -145,7 +125,10 @@ def drift_metrics(bundle: pathlib.Path, cfg: dict, env: str) -> tuple[list[str],
                              and canon(r["manifest"]) == canon(expected)), None)
                 reg_ops = {o.get("id") for o in (reg or {}).get("manifest", {}).get("operations", [])}
                 unrouted = len([o for o in shipped.get("operations", []) if o.get("id") not in reg_ops])
-                if reg and canon(reg["manifest"]) == canon(expected):
+                susp = next((r for r in rows if r["code"] == code and r["status"] == "SUSPENDED"), None)
+                if susp and not reg:
+                    state = "suspended"
+                elif reg and canon(reg["manifest"]) == canon(expected):
                     state, unrouted = "in_sync", 0
                 elif pend:
                     state = "pending_approval"
@@ -160,9 +143,12 @@ def drift_metrics(bundle: pathlib.Path, cfg: dict, env: str) -> tuple[list[str],
                 else:
                     state = "content_mismatch"
         reg_v = next((r["version"] for r in (rows or []) if r["code"] == code and r["status"] == "REGISTERED"), "")
+        reg_via = next((r.get("via", "") for r in (rows or []) if r["code"] == code and r["status"] == "REGISTERED"), "")
         metrics.append("fsp_plugin_drift" + labels(env=env, code=code, shipped_version=version,
-                       registered_version=reg_v or "none", state=state, manifest_url=url,
-                       manifest_sha256=sha[:16]) + f" {0 if state == 'in_sync' else 1}")
+                       registered_version=reg_v or "none", registered_via=(reg_via or "").lower(), state=state,
+                       manifest_url=url, ops_manifest=f"{code}-{version}.json" if url else "",
+                       base_url=plugin_base_url(cfg, code), manifest_sha256=sha[:16])
+                       + f" {0 if state == 'in_sync' else 1}")
         metrics.append("fsp_plugin_unrouted_operations" + labels(env=env, code=code) + f" {unrouted}")
         summary.append(f"  {code}: shipped {version}, registered {reg_v or 'none'} → {state}"
                        + (f" ({unrouted} operation(s) not routed)" if unrouted else "")
@@ -181,7 +167,7 @@ def main() -> None:
         print("usage: observe.py <bundle-dir>", file=sys.stderr)
         sys.exit(2)
     bundle = pathlib.Path(sys.argv[1]).resolve()
-    cfg = {**read_env(bundle / "params.env"), **read_env(bundle / "plugins.env")}
+    cfg = bundle_config(bundle)
     env = cfg["FSP_ENV"]
     textfile = pathlib.Path(cfg.get("FSP_MONITOR_TEXTFILE", "/tmp"))
     rel = release_metrics(cfg, env)

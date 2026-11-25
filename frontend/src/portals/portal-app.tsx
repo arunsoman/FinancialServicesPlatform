@@ -8,7 +8,7 @@
  * Absolute navigate targets are basename-aware (each portal boots with its
  * own basename), so '/login' and '/no-access' stay inside the portal.
  */
-import { Navigate, Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom';
+import { Link, Navigate, Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom';
 import { AppShell } from './shared/web-core/AppShell';
 import { FullscreenSpinner } from './shared/web-core/guards';
 import { LoginForm } from './shared/web-core/login-form';
@@ -48,7 +48,24 @@ function LoginRoute({ portal }: { portal: PortalConfig }) {
 
 /* ------------------------------------------------------------------ no access */
 function NoAccess({ portal }: { portal: PortalConfig }) {
-  const { user } = useSession();
+  const { user, eligible } = useSession();
+  // Signed in AND allowed in this portal: only the page that sent you here is out of reach (a
+  // screen you lack rights for, or one whose plugin is not running). The URL /no-access survives
+  // a reload, so always offer the way back instead of a dead end that blames your permissions.
+  if (user && eligible) {
+    return (
+      <div className="grid h-[100dvh] place-items-center">
+        <div className="fsp-panel max-w-md p-8 text-center">
+          <div className="fsp-eyebrow mb-2">{portal.label}</div>
+          <h1 className="mb-3 text-xl">That page is not available</h1>
+          <p className="text-dim mb-5 text-sm leading-relaxed">
+            {`You are signed in (${user.username}) and can use this portal, but the page you opened needs a right you do not hold, or is not available right now.`}
+          </p>
+          <Link className="fsp-btn" to="/">Go to the portal home</Link>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="grid h-[100dvh] place-items-center">
       <div className="fsp-panel max-w-md p-8 text-center">

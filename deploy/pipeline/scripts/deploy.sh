@@ -96,6 +96,10 @@ ensure_plugin_secrets() {
       fi
     done
   done
+  # optional: without it the release cannot register plugins (production: provision to enable)
+  if ! grep -q "^FSP_RELEASE_CREDENTIAL=" "$env" && [ "$FSP_AUTOGEN_SECRETS" = 1 ]; then
+    ensure_env_secret "$env" FSP_RELEASE_CREDENTIAL
+  fi
   [ ${#missing[@]} -eq 0 ] || die "provision first in $FSP_CONF_DIR: ${missing[*]}"
 }
 
@@ -347,4 +351,6 @@ echo "$(date -u +%FT%TZ) $MODE $RELEASE" >> "$FSP_HOME/deploy-history.log"
 trap - EXIT
 prune_images || true
 log "DONE — $FSP_ENV is running $RELEASE"
+# plugins ship as code: register what this release ships (never fails the deploy — it is live)
+python3 "$BUNDLE/scripts/register-plugins.py" "$BUNDLE" "$RELEASE" || log "plugin registration FAILED — see above (deploy itself succeeded)"
 python3 "$BUNDLE/scripts/observe.py" "$BUNDLE" || log "observe.py failed (deploy itself succeeded)"
