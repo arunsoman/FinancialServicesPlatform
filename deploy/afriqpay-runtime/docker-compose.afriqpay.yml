@@ -1,4 +1,7 @@
 # FSP production deployment — web.afriqpay.com
+# SUPERSEDED by deploy/pipeline (GitHub Actions deploys production from `main`). Kept only as the
+# record of the hand-made stack. Data paths corrected 2026-11-24 to what the running containers
+# actually mount (/home/ubuntu/fsp-data) — the former ./fsp-data would have booted prod EMPTY.
 # network: fsp-network (external, created once). TLS terminated by HOST nginx (certbot).
 # Only postgres + tigerbeetle ports stay purely internal; idp/gateway/bff publish to 127.0.0.1 only.
 
@@ -12,7 +15,7 @@ services:
       POSTGRES_USER: fsp
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - ./fsp-data/postgres:/var/lib/postgresql/data
+      - /home/ubuntu/fsp-data/postgres:/var/lib/postgresql/data
       - ./init-dbs.sql:/docker-entrypoint-initdb.d/99-fsp-plugin-dbs.sql:ro
     networks: [fsp-network]
     security_opt:
@@ -32,9 +35,9 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command: >
       "if [ -s /data/0_0.tigerbeetle ]; then echo 'tb already formatted'; else
-       format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle; fi"
+       /tigerbeetle format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle; fi"
     volumes:
-      - ./fsp-data/tigerbeetle:/data
+      - /home/ubuntu/fsp-data/tigerbeetle:/data
     restart: "no"
 
   tigerbeetle:
@@ -47,7 +50,7 @@ services:
         ipv4_address: 10.200.0.10
     command: "start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle"
     volumes:
-      - ./fsp-data/tigerbeetle:/data
+      - /home/ubuntu/fsp-data/tigerbeetle:/data
     depends_on: [tigerbeetle-format]
     restart: unless-stopped
 

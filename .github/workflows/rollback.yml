@@ -1,0 +1,94 @@
+# Roll an environment back (or forward) to ANY release tag the pipeline created.
+#
+# Nothing is rebuilt: the tag's git tree resolves to the exact image digests that ran before, and
+# the deploy bundle (compose, params, scripts) is taken from the tag itself, so the result is the
+# release as it was. The database is NOT rolled back — migrations are expand/contract, and the
+# older core accepts a newer schema (Flyway ignores *:future). A pre-deploy pg_dumpall of every
+# deploy is kept on the server for a deliberate, four-eyes restore.
+#
+# Production: only prod-* tags, and the `production` environment approval applies.
+name: rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [staging, production]
+        required: true
+      tag:
+        description: Release tag to deploy (e.g. prod-2026.11.24-17)
+        type: string
+        required: true
+      reason:
+        description: Why (recorded in the run summary)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rollback-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      TAG: ${{ inputs.tag }}
+      REASON: ${{ inputs.reason }}
+    steps:
+      - name: Validate request
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^[a-z0-9][a-z0-9._-]{2,80}$ ]] || { echo "invalid tag name"; exit 1; }
+          if [ "$ENVIRONMENT" = production ] && [[ "$TAG" != prod-* ]]; then
+            echo "production can only be rolled back to a prod-* release (something that ran in production)"; exit 1
+          fi
+          { echo "### Rollback request"; echo "- environment: \`$ENVIRONMENT\`"; echo "- tag: \`$TAG\`"
+            echo "- requested by: $GITHUB_ACTOR"; echo "- reason: $REASON"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      - name: Tag carries a pipeline bundle
+        run: test -x deploy/pipeline/scripts/deploy.sh || { echo "tag predates the pipeline — cannot be deployed by it"; exit 1; }
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve the tag's images
+        run: |
+          deploy/pipeline/scripts/resolve-release.sh "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" \
+            "$(git rev-parse 'HEAD^{tree}')" "$(git rev-parse HEAD)" release.env
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-env
+          path: release.env
+          retention-days: 90
+
+  deploy:
+    needs: resolve
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: ${{ inputs.environment }}
+      mode: rollback
+      ref: refs/tags/${{ inputs.tag }}
+      release_name: ${{ inputs.tag }}
+      create_tag: false
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: read

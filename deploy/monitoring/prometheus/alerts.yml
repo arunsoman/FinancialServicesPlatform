@@ -1,0 +1,44 @@
+# Visible in Prometheus (prom.stage.afriqpay.com/alerts) and Grafana › Alerting. No paging yet.
+groups:
+  - name: fsp-disk
+    rules:
+      - alert: FspHostDiskLow
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.15
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "Root disk below 15% free on {{ $labels.instance }}"
+      - alert: FspDataDirGrowing
+        expr: fsp_dir_bytes > 20e9
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.path }} uses {{ $value | humanize1024 }}B"
+  - name: fsp-containers
+    rules:
+      - alert: FspContainerNearMemoryLimit
+        expr: |
+          max by (env, name) (container_memory_working_set_bytes{env!=""})
+            / max by (env, name) (container_spec_memory_limit_bytes{env!=""} > 0) > 0.9
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.name }} ({{ $labels.env }}) at {{ $value | humanizePercentage }} of its memory cap"
+      - alert: FspContainerOOMKilled
+        expr: increase(container_oom_events_total{env!=""}[15m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.name }} ({{ $labels.env }}) was OOM-killed"
+  - name: fsp-releases
+    rules:
+      - alert: FspPluginDrift
+        expr: fsp_plugin_drift == 1
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.env }} plugin {{ $labels.code }}: {{ $labels.state }} (shipped {{ $labels.shipped_version }}, registered {{ $labels.registered_version }})"
+      - alert: FspObserverStale
+        expr: time() - fsp_observe_timestamp_seconds > 900
+        labels: { severity: warning }
+        annotations:
+          summary: "release/plugin observer for {{ $labels.env }} has not run for 15 minutes"

@@ -1,0 +1,123 @@
+# Build once, promote everywhere.
+#
+# Images are tagged by the git TREE hash. A merge staging → main produces the same tree, so main
+# finds the images already built and tested on staging and promotes those exact bytes; nothing is
+# rebuilt for production. A tree that was never built (e.g. a hotfix straight to main) is built here.
+#
+# Output: artifact `release-env` — release.env with the immutable digest of every image.
+name: build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Release coordinates
+        id: c
+        run: |
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Already built for this tree?
+        id: existing
+        run: |
+          if deploy/pipeline/scripts/resolve-release.sh "${{ steps.c.outputs.registry }}" "${{ steps.c.outputs.tree }}" "$GITHUB_SHA" /tmp/probe.env >/dev/null 2>&1; then
+            echo "Images for tree ${{ steps.c.outputs.tree }} exist — promoting, not rebuilding." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        if: steps.existing.outputs.build == 'true'
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        if: steps.existing.outputs.build == 'true'
+      - name: bootJars (tests already passed in the ci job)
+        if: steps.existing.outputs.build == 'true'
+        working-directory: backend
+        run: |
+          # every backend/plugins/<code>/ with a plugin-manifest.json is a plugin (gen-plugins.py)
+          plugins=$(for f in plugins/*/plugin-manifest.json; do basename "$(dirname "$f")"; done)
+          tasks=(:core:bootJar :idp:bootJar :gateway:bootJar :bff:bootJar)
+          for p in $plugins; do tasks+=(":plugins:$p:bootJar"); done
+          ./gradlew --no-daemon "${tasks[@]}"
+          mkdir -p ../.image/jars
+          for m in core idp gateway bff $(for p in $plugins; do echo "plugins/$p"; done); do
+            for jar in "$m"/build/libs/*.jar; do
+              case "$jar" in *-plain.jar) ;; *) cp "$jar" "../.image/jars/$(basename "$m").jar" ;; esac
+            done
+          done
+          ls -l ../.image/jars
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.existing.outputs.build == 'true'
+      - name: SPA build
+        if: steps.existing.outputs.build == 'true'
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile
+          bunx --bun vite build
+          mkdir -p ../.image/web && cp -a dist ../.image/web/dist
+
+      # Scan BEFORE pushing: a tree tag that exists in the registry is trusted and promoted as-is.
+      - name: Vulnerability scan of the jars + SPA — fail on fixable CRITICAL
+        if: steps.existing.outputs.build == 'true'
+        uses: anchore/scan-action@11983a512817154c80a9db660c1a184be7513ed6 # v7.4.3
+        with:
+          path: .image
+          severity-cutoff: critical
+          only-fixed: true
+          output-format: table
+
+      - name: Build + push images (SBOM + SLSA provenance attached)
+        if: steps.existing.outputs.build == 'true'
+        env:
+          REG: ${{ steps.c.outputs.registry }}
+          TREE: ${{ steps.c.outputs.tree }}
+        run: |
+          set -euo pipefail
+          labels=(--label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+                  --label "org.opencontainers.image.revision=$GITHUB_SHA"
+                  --label "com.afriqpay.fsp.tree=$TREE")
+          for jar in .image/jars/*.jar; do
+            svc=$(basename "$jar" .jar)
+            docker buildx build --push --provenance=mode=max --sbom=true "${labels[@]}" \
+              -f deploy/afriqpay-runtime/Dockerfile.runtime --build-arg "JAR=jars/$svc.jar" \
+              -t "$REG/fsp-$svc:tree-$TREE" -t "$REG/fsp-$svc:sha-$GITHUB_SHA" .image
+          done
+          docker buildx build --push --provenance=mode=max --sbom=true "${labels[@]}" \
+            -f deploy/pipeline/Dockerfile.web \
+            -t "$REG/fsp-web:tree-$TREE" -t "$REG/fsp-web:sha-$GITHUB_SHA" .image/web
+
+      - name: Release manifest (digests)
+        run: |
+          deploy/pipeline/scripts/resolve-release.sh "${{ steps.c.outputs.registry }}" \
+            "${{ steps.c.outputs.tree }}" "$GITHUB_SHA" release.env
+          { echo '### Release manifest'; echo '```'; cat release.env; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-env
+          path: release.env
+          retention-days: 90

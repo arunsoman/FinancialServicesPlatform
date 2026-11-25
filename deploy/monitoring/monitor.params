@@ -1,0 +1,24 @@
+# FSP observability stack (Grafana + Loki + Prometheus + Alloy) on web.afriqpay.com.
+# One stack watches BOTH environments; it only collects FSP containers (compose projects
+# fsp-stage, afriqpay-runtime, fsp-monitor) — never the other stacks on this host.
+FSP_MON_PROJECT=fsp-monitor
+FSP_MON_HOME=/home/ubuntu/fsp-monitor
+FSP_MON_TEXTFILE=/home/ubuntu/fsp-monitor/textfile
+FSP_MON_SLICE=fsp-monitor.slice
+FSP_MON_SUBNET=10.202.0.0/24
+FSP_UID=1000
+FSP_GID=1000
+GRAFANA_HOST=fsp-monitor.stage.afriqpay.com
+PROM_HOST=prom.stage.afriqpay.com
+GRAFANA_PORT=29300
+PROM_PORT=29390
+GITHUB_REPO=arunsoman/FinancialServicesPlatform
+FSP_STAGE_HOME=/home/ubuntu/fsp-stage
+FSP_PROD_HOME=/home/ubuntu/fsp-deploy/production
+FSP_MANIFEST_ROOT=/var/www/fsp-monitor.stage.afriqpay.com/manifests
+# disk hygiene: Loki deletes staging logs after 4 days, production after 30; Prometheus keeps
+# 15 days but never more than 2 GB.
+LOKI_RETENTION_STAGING=96h
+LOKI_RETENTION_PRODUCTION=720h
+PROM_RETENTION_TIME=15d
+PROM_RETENTION_SIZE=2GB

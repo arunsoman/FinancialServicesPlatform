@@ -1,0 +1,155 @@
+// FSP — container logs → Loki; container + host metrics (+ FSP textfile metrics) → Prometheus.
+// Only FSP compose projects are kept: fsp-stage (staging), afriqpay-runtime (production),
+// fsp-monitor (this stack). Every other container on the host is dropped at discovery.
+
+// ---------------------------------------------------------------- logs
+discovery.docker "all" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "30s"
+}
+
+discovery.relabel "fsp" {
+  targets = discovery.docker.all.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "fsp-stage|afriqpay-runtime|fsp-monitor"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "fsp-stage"
+    target_label  = "env"
+    replacement   = "staging"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "afriqpay-runtime"
+    target_label  = "env"
+    replacement   = "production"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "fsp-monitor"
+    target_label  = "env"
+    replacement   = "monitoring"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "fsp" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.fsp.output
+  refresh_interval = "30s"
+  forward_to       = [loki.process.fsp.receiver]
+}
+
+// FSP services log one key=value line per event (level=INFO ...): lift `level` into a label.
+loki.process "fsp" {
+  stage.logfmt {
+    mapping = { "level" = "" }
+  }
+  // one spelling for the Level filter: INFO / WARN / ERROR / DEBUG
+  stage.template {
+    source   = "level"
+    template = "{{ ToUpper .Value }}"
+  }
+  stage.replace {
+    source     = "level"
+    expression = "^(WARNING)$"
+    replace    = "WARN"
+  }
+  stage.labels {
+    values = { "level" = "" }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// ---------------------------------------------------------------- container metrics
+prometheus.exporter.cadvisor "containers" {
+  docker_host                  = "unix:///var/run/docker.sock"
+  docker_only                  = true
+  storage_duration             = "2m"
+  store_container_labels       = false
+  allowlisted_container_labels = ["com.docker.compose.project", "com.docker.compose.service"]
+}
+
+prometheus.scrape "containers" {
+  targets         = prometheus.exporter.cadvisor.containers.targets
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.fsp_only.receiver]
+}
+
+prometheus.relabel "fsp_only" {
+  rule {
+    source_labels = ["container_label_com_docker_compose_project"]
+    regex         = "fsp-stage|afriqpay-runtime|fsp-monitor"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["container_label_com_docker_compose_project"]
+    regex         = "fsp-stage"
+    target_label  = "env"
+    replacement   = "staging"
+  }
+  rule {
+    source_labels = ["container_label_com_docker_compose_project"]
+    regex         = "afriqpay-runtime"
+    target_label  = "env"
+    replacement   = "production"
+  }
+  rule {
+    source_labels = ["container_label_com_docker_compose_project"]
+    regex         = "fsp-monitor"
+    target_label  = "env"
+    replacement   = "monitoring"
+  }
+  rule {
+    source_labels = ["container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  forward_to = [prometheus.remote_write.local.receiver]
+}
+
+// ---------------------------------------------------------------- host + FSP textfile metrics
+// textfile: fsp_release_*, fsp_plugin_* (observe.py) and fsp_dir_bytes (fsp-ops.sh hygiene)
+prometheus.exporter.unix "host" {
+  procfs_path    = "/host/proc"
+  sysfs_path     = "/sys"
+  rootfs_path    = "/rootfs"
+  set_collectors = ["cpu", "meminfo", "loadavg", "filesystem", "diskstats", "textfile"]
+
+  textfile {
+    directory = "/textfile"
+  }
+  filesystem {
+    mount_points_exclude = "^/(dev|proc|run|sys|snap|var/lib/docker/.+)($|/)"
+    fs_types_exclude     = "^(tmpfs|devtmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2?|autofs|fuse.*)$"
+  }
+}
+
+prometheus.scrape "host" {
+  targets         = prometheus.exporter.unix.host.targets
+  scrape_interval = "60s"
+  forward_to      = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}

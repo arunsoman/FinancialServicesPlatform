@@ -1,0 +1,174 @@
+# Pull-request checks — required to merge into `staging` or `main` (branch protection).
+# Also called by deliver.yml on every push to staging/main, so nothing is deployed unchecked.
+#
+# Security note (public repo): this runs on `pull_request`, never `pull_request_target`, so code
+# from forks runs without secrets and with a read-only token.
+name: ci
+
+on:
+  pull_request:
+    branches: [staging, main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow_ref }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      backend: ${{ github.event_name != 'pull_request' || steps.f.outputs.backend == 'true' }}
+      frontend: ${{ github.event_name != 'pull_request' || steps.f.outputs.frontend == 'true' }}
+      deploy: ${{ github.event_name != 'pull_request' || steps.f.outputs.deploy == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: f
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+            deploy:
+              - 'deploy/**'
+              - 'backend/plugins/*/plugin-manifest.json'
+              - 'backend/plugins/*/deploy.json'
+              - '.github/workflows/**'
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/staging' && github.ref != 'refs/heads/main' }}
+      - name: Compile + unit tests (all modules)
+        working-directory: backend
+        run: ./gradlew build --no-daemon --stacktrace
+      - name: Test report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-test-reports
+          path: backend/**/build/reports/tests/
+          retention-days: 7
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck          # never `tsc -b`: it emits .js next to the sources
+      - run: bun run test
+      - run: bun run widgets:check      # widget registry coherence
+      - run: bun run menus:check        # every seeded portal menu renders with this build
+      - run: bunx --bun vite build
+
+  docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Architecture docs are fresh (make docs-check)
+        run: node docs/gen/refresh.cjs --check
+
+  deploy-config:
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: shellcheck deploy + monitoring scripts
+        run: shellcheck -S warning -x deploy/pipeline/scripts/*.sh deploy/monitoring/scripts/*.sh deploy/monitoring/bin/*.sh
+      - name: compose renders for every environment
+        run: |
+          set -euo pipefail
+          python3 deploy/pipeline/scripts/gen-plugins.py . /tmp/bundle
+          cp deploy/pipeline/compose*.yml /tmp/bundle/
+          cd /tmp/bundle
+          printf '%s=x\n' POSTGRES_PASSWORD FSP_BOOTSTRAP_PASSWORD FSP_INTERNAL_CREDENTIAL FSP_PERSON_PASSWORD \
+            FSP_PLUGIN_KYC_DB_PASSWORD FSP_PLUGIN_INVENTORY_DB_PASSWORD FSP_PLUGIN_INVENTORY_KEK > /tmp/secrets.env
+          . ./plugins.env
+          for s in core idp gateway bff $FSP_PLUGINS; do echo "FSP_IMAGE_${s^^}=example/$s@sha256:$(printf %064d 0)"; done > /tmp/release.env
+          for p in $FSP_PLUGINS; do v="FSP_PLUGIN_${p^^}_SECRETS"; for x in ${!v}; do echo "$x=x" >> /tmp/secrets.env; done; done
+          for e in staging production; do
+            params="$GITHUB_WORKSPACE/deploy/pipeline/env/$e.params"
+            overlays=$(bash -c "set -a; . '$params'; echo \$FSP_OVERLAYS")
+            args=(-f compose.yml -f compose.plugins.yml); for o in $overlays; do args+=(-f "$o"); done
+            docker compose "${args[@]}" --env-file /tmp/secrets.env --env-file "$params" --env-file plugins.env \
+              --env-file /tmp/release.env config --quiet
+            echo "compose OK for $e"
+          done
+      - name: monitoring stack renders
+        run: |
+          cd deploy/monitoring
+          printf 'GRAFANA_ADMIN_PASSWORD=x\n' > /tmp/mon.env
+          docker compose -f compose.yml --env-file monitor.params --env-file /tmp/mon.env config --quiet
+          docker run --rm -v "$PWD/prometheus:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:v3.16.0 \
+            check config /etc/prometheus/prometheus.yml
+          docker run --rm -e LOKI_RETENTION_STAGING=96h -e LOKI_RETENTION_PRODUCTION=720h -v "$PWD/loki:/l:ro" \
+            grafana/loki:3.7.10 -config.file=/l/loki.yml -config.expand-env=true -verify-config
+          docker run --rm -v "$PWD/alloy:/a:ro" grafana/alloy:v1.22.0 fmt /a/config.alloy >/dev/null
+          for f in grafana/dashboards/*.json; do python3 -m json.tool "$f" >/dev/null; done
+
+  plugins:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Plugin manifests only grow within a major version (rollback-safe)
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: |
+          case "$BASE" in ''|0000000000000000000000000000000000000000) BASE="" ;; esac
+          python3 deploy/pipeline/scripts/check-plugin-manifests.py "$BASE"
+      - name: Plugin folders generate a valid bundle
+        run: python3 deploy/pipeline/scripts/gen-plugins.py . /tmp/bundle
+
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Secret scan (new commits)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+      - name: Vulnerable / disallowed dependencies introduced by this PR
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: high

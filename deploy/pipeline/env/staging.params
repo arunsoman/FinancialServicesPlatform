@@ -1,0 +1,35 @@
+# Staging — *.stage.afriqpay.com. Everything here is namespaced so it cannot touch another stack:
+# own compose project, container names, network + subnet, loopback ports, data dir, cgroup slice.
+FSP_ENV=staging
+FSP_PROJECT=fsp-stage
+FSP_PREFIX=fsp-stage
+FSP_HOME=/home/ubuntu/fsp-stage
+FSP_CONF_DIR=/home/ubuntu/fsp-stage/conf
+FSP_DATA_DIR=/home/ubuntu/fsp-stage/data
+FSP_BACKUP_DIR=/home/ubuntu/fsp-stage/backups
+FSP_BACKUP_KEEP=5
+FSP_NETWORK=fsp-stage-network
+FSP_NETWORK_SUBNET=10.201.0.0/24
+FSP_TB_IP=10.201.0.10
+FSP_TB_FORMAT_FLAGS=--development
+FSP_TB_START_FLAGS="--development --cache-grid=64MiB"
+FSP_PORT_BFF=29080
+FSP_PORT_IDP=29082
+FSP_PORT_GATEWAY=29090
+FSP_PUBLIC_HOST=fsp.stage.afriqpay.com
+FSP_AUTH_HOST=fsp-auth.stage.afriqpay.com
+FSP_API_HOST=fsp-api.stage.afriqpay.com
+FSP_WEB_ROOT=/var/www/fsp.stage.afriqpay.com/html
+FSP_OVERLAYS="compose.stage-limits.yml compose.plugins.stage-limits.yml"
+FSP_SLICE=fsp-stage.slice
+FSP_WAIT_SECONDS=1200
+FSP_REQUIRE_EXISTING_DATA=0
+FSP_LOG_MAX_SIZE=5m
+FSP_LOG_MAX_FILES=2
+# staging may create missing secrets/keys itself (e.g. for a newly added plugin); production never
+FSP_AUTOGEN_SECRETS=1
+# disk hygiene (deploy/monitoring/bin/fsp-ops.sh): logs, backups, bundles older than this are deleted
+FSP_KEEP_DAYS=4
+# observability (deploy/monitoring): release + plugin-drift metrics, per-env plugin manifests
+FSP_MONITOR_TEXTFILE=/home/ubuntu/fsp-monitor/textfile
+FSP_MANIFEST_ROOT=/var/www/fsp-monitor.stage.afriqpay.com/manifests

@@ -1,0 +1,56 @@
+# Continuous delivery.
+#
+#   push to `staging` → checks → build (or reuse by tree) → deploy *.stage.afriqpay.com → tag stage-*
+#   push to `main`    → checks → promote the SAME images staging ran → [approval] → production → tag prod-*
+#
+# Production deploys stay OFF until the repository variable PRODUCTION_DEPLOY_ENABLED is 'true'
+# (Settings → Secrets and variables → Actions → Variables). Turn it on only when `main` contains
+# everything production runs today — deploy.sh refuses a release older than the live database anyway.
+name: deliver
+
+on:
+  push:
+    branches: [staging, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deliver-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
+  build:
+    needs: checks
+    uses: ./.github/workflows/_build.yml
+    permissions:
+      contents: read
+      packages: write
+
+  staging:
+    needs: build
+    if: github.ref_name == 'staging'
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: staging
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: read
+
+  production:
+    needs: build
+    if: github.ref_name == 'main' && vars.PRODUCTION_DEPLOY_ENABLED == 'true'
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: production
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: read

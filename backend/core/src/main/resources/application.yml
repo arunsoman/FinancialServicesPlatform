@@ -19,7 +19,9 @@ spring:
     enabled: true
     locations: classpath:db/migration,classpath:db/seed/system
     # Consolidated-away migrations stay in the install history (dev DBs) — missing files are intentional.
-    ignore-migration-patterns: "*:missing"
+    # *:future keeps Flyway's default: an OLDER core boots on a NEWER schema, which is what a
+    # tag rollback does (rollback.yml; migrations are expand/contract). Without it, rollback crashes.
+    ignore-migration-patterns: "*:missing,*:future"
     placeholders:
       fspBootstrapPassword: ${FSP_BOOTSTRAP_PASSWORD:fsp-admin}
 
