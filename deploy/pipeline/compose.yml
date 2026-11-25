@@ -113,7 +113,7 @@ services:
       core: { condition: service_healthy }   # idp validates the schema core's Flyway just migrated
     logging: *logging
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082/.well-known/openid-configuration >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082/idp/.well-known/openid-configuration >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 60
