@@ -20,6 +20,19 @@ public class ParService {
 
     private static final Logger log = LoggerFactory.getLogger(ParService.class);
     private static final int PAR_EXPIRY_SECONDS = 60;
+    /**
+     * Once the authorization endpoint has fetched the request (the person is on the hosted
+     * sign-in page), the transaction lives at the AS and the person gets human time to type —
+     * RFC 9126 §4. Staging 2026-11-25: a sign-in submitted 92 s after the page opened hit the
+     * 60 s PAR TTL and failed. The 60 s still bounds an UNFETCHED request_uri.
+     */
+    static final int INTERACTION_SECONDS = 600;
+    /** request_uris the authorization endpoint has fetched (interaction window applies). */
+    private final java.util.Set<String> fetched = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private long ttlSeconds(String requestUri) {
+        return fetched.contains(requestUri) ? INTERACTION_SECONDS : PAR_EXPIRY_SECONDS;
+    }
     private static final java.util.regex.Pattern STATE_PATTERN =
         java.util.regex.Pattern.compile("^[A-Za-z0-9._~-]{1,256}$");
 
@@ -217,11 +230,14 @@ public class ParService {
         if (data == null) {
             return null;
         }
-        if (Instant.now().isAfter(data.createdAt().plusSeconds(PAR_EXPIRY_SECONDS))) {
+        if (Instant.now().isAfter(data.createdAt().plusSeconds(ttlSeconds(requestUri)))) {
             parStore.remove(requestUri);
-            log.warn("par_expired requestUri={}", requestUri);
+            boolean wasFetched = fetched.remove(requestUri);
+            log.warn("par_expired requestUri={} fetched={} ageS={}", requestUri, wasFetched,
+                java.time.Duration.between(data.createdAt(), Instant.now()).toSeconds());
             return null;
         }
+        fetched.add(requestUri);
         parStore.put(requestUri, new ParRequestData(data.clientId(), data.codeChallenge(), data.codeChallengeMethod(),
             data.redirectUri(), data.scope(), data.authorizationDetails(), data.resource(), data.state(), Instant.now()));
         return data;
@@ -233,12 +249,16 @@ public class ParService {
      */
     public ParRequestData consumeParRequest(String requestUri) {
         ParRequestData data = parStore.remove(requestUri);
+        long ttl = ttlSeconds(requestUri);
+        boolean wasFetched = fetched.remove(requestUri);
         if (data == null) {
+            log.warn("par_unknown requestUri={} (already used, or the IdP restarted)", requestUri);
             return null;
         }
         // Check expiry
-        if (Instant.now().isAfter(data.createdAt().plusSeconds(PAR_EXPIRY_SECONDS))) {
-            log.warn("par_expired requestUri={}", requestUri);
+        long age = java.time.Duration.between(data.createdAt(), Instant.now()).toSeconds();
+        if (age > ttl) {
+            log.warn("par_expired requestUri={} fetched={} ageS={} ttlS={}", requestUri, wasFetched, age, ttl);
             return null;
         }
         return data;
