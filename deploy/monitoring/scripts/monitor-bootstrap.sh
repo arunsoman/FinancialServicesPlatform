@@ -234,5 +234,5 @@ log "crontab: observe every 5 min, hygiene hourly"
 
 # --- 7. start ------------------------------------------------------------------------------------
 bash "$STACK/scripts/monitor-up.sh"
-log "Grafana: https://$GRAFANA_HOST (user admin, password GRAFANA_ADMIN_PASSWORD in $FSP_MON_HOME/.env)"
-log "Prometheus + manifests: basic auth user fsp-ops, password OPS_BASIC_AUTH_PASSWORD in $FSP_MON_HOME/.env"
+log "Grafana: https://$GRAFANA_STAGING_HOST/ops/ — sign in with your FSP platform account (https://$GRAFANA_HOST redirects there)"
+log "Prometheus: basic auth user fsp-ops, password OPS_BASIC_AUTH_PASSWORD in $FSP_MON_HOME/.env"

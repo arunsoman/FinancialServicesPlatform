@@ -49,7 +49,12 @@ export function SessionProvider({ portal, children }: { portal: PortalConfig; ch
   }, [portal]);
 
   useEffect(() => {
-    refresh();
+    // A hiccup (5xx, rate limit after retries) keeps "Restoring session" and tries again — never
+    // a false "No access" for a signed-in person.
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const run = () => { refresh().catch(() => { retry = setTimeout(run, 3000); }); };
+    run();
+    return () => clearTimeout(retry);
   }, [refresh]);
 
   // F-12: on the FIRST authed hydration of this page load, start the unread badge poll and

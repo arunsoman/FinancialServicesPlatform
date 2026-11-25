@@ -129,8 +129,10 @@ export async function loadPermissions(): Promise<string[]> {
     const r = await apiGet<{ tenantId: string; permissions: string[] }>('/api/me/permissions');
     return r.permissions;
   } catch (e) {
-    if (e instanceof ApiError && e.code === 'AUTH_REQUIRED') throw e; // session expired → bounce to login
-    return [];
+    // Only a real denial means "no permissions". Anything else (rate limit, 5xx, network) is an
+    // error: showing a signed-in person "No access" for a hiccup is wrong (staging 2026-11-25).
+    if (e instanceof ApiError && e.status === 403) return [];
+    throw e; // AUTH_REQUIRED → bounce to login; others → the caller's error path
   }
 }
 

@@ -35,9 +35,11 @@ public final class GatewayProperties {
     private String assertionKey = "../../infrastructure/pki/dev/gateway-assertion.pem";
     private boolean assertionKeyCreate = true;
 
-    /** Per-client (browser) rate limit at the gateway edge. Defense-in-depth only —
-     *  FAPI 2.0 does not prescribe inter-request spacing (see BrowserRateLimiter). */
-    private RateLimit rateLimit = new RateLimit(true, 1, Duration.ofMillis(250));
+    /** Per-session rate limit at the gateway edge. Defense-in-depth only — FAPI 2.0 does not
+     *  prescribe inter-request spacing (see BrowserRateLimiter). 40 per second leaves room for a
+     *  portal page load (~8 parallel calls) and a dashboard refresh; was 1 per 250 ms, which
+     *  rejected most page loads. */
+    private RateLimit rateLimit = new RateLimit(true, 40, Duration.ofSeconds(1));
 
     public RateLimit getRateLimit() { return rateLimit; }
     public void setRateLimit(RateLimit v) { this.rateLimit = v; }
