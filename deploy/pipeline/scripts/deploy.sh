@@ -276,13 +276,13 @@ publish_web() {
 
 smoke() {
   log "smoke checks"
-  curl -fsS --max-time 10 "http://127.0.0.1:$FSP_PORT_IDP/.well-known/openid-configuration" | grep -q "$FSP_AUTH_HOST" \
+  curl -fsS --max-time 10 "http://127.0.0.1:$FSP_PORT_IDP/idp/.well-known/openid-configuration" | grep -q "$FSP_AUTH_HOST" \
     || die "idp discovery does not advertise https://$FSP_AUTH_HOST"
   curl -fsS --max-time 10 -o /dev/null "http://127.0.0.1:$FSP_PORT_GATEWAY/.well-known/fsp-actor-jwks" || die "gateway JWKS"
   curl -fsS --max-time 20 -o /dev/null "http://127.0.0.1:$FSP_PORT_BFF/bff/csrf" || die "bff → gateway → idp chain (/bff/csrf)"
   curl -fsS --max-time 20 -o /dev/null "https://$FSP_PUBLIC_HOST/" || die "https://$FSP_PUBLIC_HOST/ not serving"
   curl -fsS --max-time 20 -o /dev/null "https://$FSP_PUBLIC_HOST/bff/csrf" || die "https://$FSP_PUBLIC_HOST/bff/csrf"
-  curl -fsS --max-time 20 -o /dev/null "https://$FSP_AUTH_HOST/.well-known/openid-configuration" || die "https://$FSP_AUTH_HOST"
+  curl -fsS --max-time 20 -o /dev/null "https://$FSP_AUTH_HOST/idp/.well-known/openid-configuration" || die "https://$FSP_AUTH_HOST"
 }
 
 prune_images() {
