@@ -24,7 +24,7 @@ die() { printf 'ABORT: %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -un)" = ubuntu ] || die "run as the deploy user (ubuntu)"
 [ "$STACK" = "$FSP_MON_HOME/stack" ] || die "sync deploy/monitoring to $FSP_MON_HOME/stack first (see header)"
-sudo -v
+sudo -n true 2>/dev/null || die "needs passwordless sudo (NOPASSWD) for the deploy user"
 for h in "$GRAFANA_HOST" "$PROM_HOST"; do getent ahostsv4 "$h" | grep -q . || die "DNS: $h does not resolve"; done
 
 # --- 1. dirs + secrets --------------------------------------------------------------------------

@@ -18,7 +18,7 @@ log() { printf '==> %s\n' "$*"; }
 die() { printf 'ABORT: %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -un)" = ubuntu ] || die "run as the deploy user (ubuntu)"
-sudo -v
+sudo -n true 2>/dev/null || die "needs passwordless sudo (NOPASSWD) for the deploy user"
 
 # --- 1. directories + core secrets (generated once, chmod 600, never leave the server) ------
 log "directories under $FSP_HOME"
