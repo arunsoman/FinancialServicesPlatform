@@ -16,6 +16,7 @@ import java.util.UUID;
  *  - CLIENT_ACTIVE: proven by the DPoP-bound token that made this very call;
  *  - GL_ACCOUNTS_ENSURED: the plugin's CoA rows ensured in the installation's ACTIVE book
  *     (plan decision D5, additive-by-code; the idempotency key is deterministic per tenant+book);
+ *     no book there (the platform root) → deferred to each organization's first use;
  *  - PERMISSIONS_SEEDED / SECRETS_PROVISIONED / DEPENDENCIES_READY: this plugin contributes no
  *    per-installation secrets and depends on no other plugin, so these are satisfied by
  *    construction (a plugin that has them must check before reporting).
@@ -60,16 +61,17 @@ public class ReadinessReporter {
         }
     }
 
-    /** Gate GL_ACCOUNTS_ENSURED — additive-by-code CoA ensure (decision D5); the key is
-     *  deterministic per tenant + book inside CoreClient. */
+    /** Gate GL_ACCOUNTS_ENSURED — the plugin's money wiring is in place for THIS installation.
+     *  Installed on an organization with a book → its CoA rows are ensured now. Installed on one
+     *  without a book (the platform root, under easy install) → nothing to wire there: every
+     *  organization below gets its rows in its own book on first use (GlBookResolver). */
     private void ensureGl(UUID tenantId, UUID installationId) {
-        var ledger = glResolver.refs(tenantId);
-        List<Map<String, Object>> rows = CoaRows.rows(tenantId).stream()
-            .<Map<String, Object>>map(r -> Map.of(
-                "code", r.code(), "name", r.name(), "accountType", r.accountType(),
-                "normalBalance", r.normalBalance(), "balanceBound", r.balanceBound()))
-            .toList();
-        core.ensureGlAccounts(tenantId, ledger.bookId(), rows);
-        log.info("inventory_gl_accounts_ensured tenantId={} book={}", tenantId, ledger.bookId());
+        var ledger = glResolver.findRefs(tenantId);
+        if (ledger.isEmpty()) {
+            log.info("inventory_gl_deferred installationId={} tenantId={} reason=no_book_here "
+                + "(each organization's GL accounts are created in its own book on first use)", installationId, tenantId);
+            return;
+        }
+        glResolver.ensureCoa(tenantId, ledger.get().bookId(), true);
     }
 }
