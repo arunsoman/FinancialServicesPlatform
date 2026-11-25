@@ -1,5 +1,10 @@
 server:
   port: 8082
+  # Location headers stay relative (same origin as the page). Behind the TLS proxy Tomcat would
+  # otherwise build http://…/idp/error, which the hosted page's CSP (form-action 'self') blocks
+  # after a form POST — the sign-in page froze with a grey button (staging 2026-11-25).
+  tomcat:
+    use-relative-redirects: true
 spring:
   application:
     name: fsp-idp
