@@ -1,6 +1,7 @@
 package com.fsp.plugin.kyc.api;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -16,14 +17,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ApiProblemException.class)
     public ResponseEntity<Map<String, Object>> handleApiProblem(ApiProblemException e) {
         log.warn("api_problem code={} status={} detail={}", e.getCode(), e.getStatus(), e.getMessage());
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("type", "about:blank");
-        body.put("title", e.getCode());
-        body.put("code", e.getCode());
-        body.put("status", e.getStatus());
-        body.put("detail", e.getMessage());
-        body.put("instance", null);
-        return ResponseEntity.status(e.getStatus()).body(body);
+        return ResponseEntity.status(e.getStatus()).contentType(MediaType.APPLICATION_PROBLEM_JSON)
+            .body(e.toProblemDetails());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

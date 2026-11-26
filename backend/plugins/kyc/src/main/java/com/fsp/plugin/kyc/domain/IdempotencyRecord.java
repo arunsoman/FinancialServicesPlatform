@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -38,6 +39,9 @@ public class IdempotencyRecord {
 
     @Column(nullable = false)
     public Instant updatedAt = Instant.now();
+
+    @Version
+    public long version;
 
     public IdempotencyRecord() {}
 }

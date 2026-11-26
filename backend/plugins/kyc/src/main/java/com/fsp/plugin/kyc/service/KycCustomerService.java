@@ -1,5 +1,8 @@
 package com.fsp.plugin.kyc.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fsp.plugin.kyc.api.ApiProblemException;
 import com.fsp.plugin.kyc.api.KycDtos;
 import com.fsp.plugin.kyc.domain.IdempotencyRecord;
@@ -7,10 +10,12 @@ import com.fsp.plugin.kyc.domain.KycCase;
 import com.fsp.plugin.kyc.repository.IdempotencyRecordRepository;
 import com.fsp.plugin.kyc.repository.KycCaseRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.io.IOException;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -19,7 +24,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -41,10 +45,7 @@ import java.util.UUID;
 @Service
 public class KycCustomerService {
 
-    private static final Set<String> CUSTOMER_FIELD_REJECTIONS = Set.of(
-        "CUSTOMER_FIELDS", "CUSTOMER_EMAIL_TAKEN", "CUSTOMER_PHONE_TAKEN", "CUSTOMER_CONTACT_TAKEN",
-        "EMAIL_INVALID", "PHONE_INVALID", "PRIMARY_CONTACT_INVALID", "CONTACT_REQUIRED",
-        "USERNAME_INVALID", "USERNAME_TAKEN");
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final KycCaseRepository cases;
     private final KycCaseService caseService;
@@ -68,12 +69,18 @@ public class KycCustomerService {
 
     public KycCase onboard(UUID ownerTenantId, UUID makerPersonId, String makerName,
                            KycDtos.CreateCustomerRequest req, String actorAssertion, String idempotencyKey) {
+        IdempotencyRecord priorRecord = idempotency.findByPersonIdAndRequestKey(makerPersonId, idempotencyKey)
+            .orElse(null);
+        if (priorRecord != null) throw replayOrReject(priorRecord);
+
         Validated v = validate(req);
 
         // 1. the case exists before core is asked for the person
         KycCase created = tx.execute(s -> {
-            if (idempotency.findByPersonIdAndRequestKey(makerPersonId, idempotencyKey).isPresent()) {
-                throw new ApiProblemException("IDEMPOTENCY_KEY_REUSED", "Idempotency key already used", 409);
+            IdempotencyRecord previous = idempotency.findByPersonIdAndRequestKey(makerPersonId, idempotencyKey)
+                .orElse(null);
+            if (previous != null) {
+                throw replayOrReject(previous);
             }
             if (v.email() != null && openCaseWith(ownerTenantId, "lower(email) = lower(?)", v.email())) {
                 throw new ApiProblemException("CUSTOMER_EMAIL_TAKEN", "Email is already registered.", 409);
@@ -140,13 +147,31 @@ public class KycCustomerService {
         try {
             person = core.createCustomer(ownerTenantId, body, actorAssertion, "kyc-customer-" + caseId);
         } catch (ApiProblemException e) {
-            if (CUSTOMER_FIELD_REJECTIONS.contains(e.getCode())) {
-                tx.executeWithoutResult(s -> {
-                    cases.deleteById(caseId);
-                    idempotency.findByPersonIdAndRequestKey(makerPersonId, idempotencyKey)
-                        .ifPresent(idempotency::delete);
-                });
-                log.warn("kyc_customer_registration_validation_rejected caseId={} code={}", caseId, e.getCode());
+            if (e.getStatus() >= 400 && e.getStatus() < 500) {
+                try {
+                    tx.executeWithoutResult(s -> {
+                        KycCase x = cases.findById(caseId).orElseThrow();
+                        x.status = KycCase.STATUS_REJECTED;
+                        x.updatedAt = Instant.now();
+                        cases.save(x);
+                        caseService.event(x, "CORE_REJECTED", "KYC plugin",
+                            "Platform refused the customer: " + e.getCode());
+
+                        IdempotencyRecord record = idempotency.findByPersonIdAndRequestKey(makerPersonId, idempotencyKey)
+                            .orElseThrow(() -> new IllegalStateException("KYC idempotency record is missing"));
+                        record.status = "DONE";
+                        record.responseStatus = e.getStatus();
+                        record.responseContentType = MediaType.APPLICATION_PROBLEM_JSON_VALUE;
+                        record.responseBody = problemBody(e);
+                        record.updatedAt = Instant.now();
+                        idempotency.save(record);
+                    });
+                } catch (RuntimeException cleanupFailure) {
+                    e.addSuppressed(cleanupFailure);
+                    log.error("kyc_customer_rejection_cleanup_failed caseId={} code={}",
+                        caseId, e.getCode(), cleanupFailure);
+                }
+                log.warn("kyc_customer_registration_core_rejected caseId={} code={}", caseId, e.getCode());
             }
             throw e;
         }
@@ -299,8 +324,34 @@ public class KycCustomerService {
 
     private boolean openCaseWith(UUID owner, String predicate, String value) {
         Boolean b = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM kyc_cases WHERE owner_tenant_id = ? "
-            + "AND case_kind = 'CUSTOMER' AND status <> 'REJECTED' AND " + predicate + ")", Boolean.class, owner, value);
+            + "AND case_kind = 'CUSTOMER' AND status NOT IN ('REJECTED', 'STALLED') AND " + predicate + ")",
+            Boolean.class, owner, value);
         return Boolean.TRUE.equals(b);
+    }
+
+    private static ApiProblemException replayOrReject(IdempotencyRecord record) {
+        if ("DONE".equals(record.status) && record.responseStatus != null
+                && record.responseStatus >= 400 && record.responseStatus < 500 && record.responseBody != null) {
+            try {
+                JsonNode body = MAPPER.readTree(record.responseBody);
+                String code = body.path("code").asText(body.path("title").asText("IDEMPOTENCY_ERROR"));
+                String detail = body.path("detail").asText("The original request was rejected");
+                return new ApiProblemException(code, detail, record.responseStatus);
+            } catch (IOException e) {
+                log.error("kyc_customer_idempotency_response_invalid status={}", record.responseStatus, e);
+                return new ApiProblemException("IDEMPOTENCY_RESPONSE_INVALID",
+                    "The original response could not be replayed", 500);
+            }
+        }
+        return new ApiProblemException("IDEMPOTENCY_KEY_REUSED", "Idempotency key already used", 409);
+    }
+
+    private static byte[] problemBody(ApiProblemException e) {
+        try {
+            return MAPPER.writeValueAsBytes(e.toProblemDetails());
+        } catch (JsonProcessingException serializationFailure) {
+            throw new IllegalStateException("Could not serialize the KYC problem response", serializationFailure);
+        }
     }
 
     record Address(String line, String city, String region, String postalCode) {}
