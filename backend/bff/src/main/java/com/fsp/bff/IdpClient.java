@@ -123,7 +123,7 @@ public class IdpClient {
         String clientAssertion,    // assertion captured at PAR initiation (informational)
         Instant parExpiresAt,
         String state               // CSRF binding for the authorization response (RFC 6749 §10.12)
-    ) {}
+    ) implements java.io.Serializable {}
 
     /**
      * Step 1: Initiate PAR flow - generate PKCE, DPoP key, client_assertion, call /par.
