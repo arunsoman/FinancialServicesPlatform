@@ -22,7 +22,10 @@ import java.util.function.Function;
  *
  * Wire form: compact JWS, header {alg: ES256, typ: fsp-actor+jwt, kid}, payload
  * { iss: fsp-gateway, aud: "plugin:<code>", sub: personId, tid, uname, clid, op, perm,
- *   target, corr, htm, htu, jti, iat, exp } with a 60 s lifetime.
+ *   target, corr, htm, htu, jti, iat, exp [, act, home] } with a 60 s lifetime.
+ * {@code act}/{@code home} are present only while the person acts as a tenant
+ * (plans/act-as-tenant-plan.md): {@code tid} is then the acted-as tenant, {@code act} the
+ * act-as session core verified for the gateway, {@code home} the person's own tenant.
  *
  * The gateway holds the private key ({@link #issuer}); core and plugins hold only the
  * public JWKS ({@link #verifier}). Verification checks the SIGNATURE FIRST, then
@@ -79,13 +82,25 @@ public final class ActorAssertion {
     /** What a person→plugin request is allowed to do, as decided by core. */
     public record Subject(String personId, String tenantId, String username, String clientId,
                           String operationId, String permission, String targetTenantId,
-                          String correlationId) {}
+                          String correlationId, String actSessionId, String homeTenantId) {
+        /** Not acting: the person works in their own tenant. */
+        public Subject(String personId, String tenantId, String username, String clientId,
+                       String operationId, String permission, String targetTenantId, String correlationId) {
+            this(personId, tenantId, username, clientId, operationId, permission, targetTenantId,
+                correlationId, null, null);
+        }
+    }
 
     /** Verified result of an assertion check. */
     public record VerifiedActor(String personId, String tenantId, String username,
                                 String clientId, String operationId, String permission,
                                 String targetTenantId, String correlationId, String jti,
-                                String audience) {}
+                                String audience, String actSessionId, String homeTenantId) {
+        /** True when the gateway stated an act-as session (re-verified by core before use). */
+        public boolean acting() {
+            return actSessionId != null && !actSessionId.isBlank();
+        }
+    }
 
     /** A verification failure with a stable code (ASSERTION_*). */
     public static final class Rejected extends RuntimeException {
@@ -117,6 +132,10 @@ public final class ActorAssertion {
         p.put("perm", nz(s.permission()));
         p.put("target", nz(s.targetTenantId()));
         p.put("corr", nz(s.correlationId()));
+        if (s.actSessionId() != null && !s.actSessionId().isBlank()) {
+            p.put("act", s.actSessionId());
+            p.put("home", nz(s.homeTenantId()));
+        }
         p.put("htm", httpMethod.toUpperCase());
         p.put("htu", requestPath);
         p.put("jti", UUID.randomUUID().toString());
@@ -204,7 +223,12 @@ public final class ActorAssertion {
         return new VerifiedActor(p.path("sub").asText(), p.path("tid").asText(),
             p.path("uname").asText(), p.path("clid").asText(), p.path("op").asText(),
             p.path("perm").asText(), p.path("target").asText(), p.path("corr").asText(), jti,
-            aud.asText());
+            aud.asText(), textOrNull(p, "act"), textOrNull(p, "home"));
+    }
+
+    private static String textOrNull(JsonNode p, String field) {
+        String v = p.path(field).asText("");
+        return v.isBlank() ? null : v;
     }
 
     private void consume(String jti, long exp, long now) {

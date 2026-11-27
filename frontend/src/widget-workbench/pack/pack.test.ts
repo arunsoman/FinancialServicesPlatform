@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { checkDataModule, llmInput, parsePack } from './pack';
-import type { Endpoint } from './pack';
+import { backendApiPromptSection, checkDataModule, llmInput, parseBackendProposal, parsePack, PROPOSED_CONTROLLER, WORKBENCH_MODE_LINE } from './pack';
+import type { BackendApi, Endpoint } from './pack';
 
 const INDEX = `import { defineWidget } from '../../core/manifest';
 import { span } from '../../core/grid';
@@ -119,5 +119,128 @@ describe('llmInput', () => {
     expect(t.indexOf('# SKILL')).toBe(0);
     expect(t).toContain('# Requirement\n\nShow disabled users\n');
     expect(t.indexOf('Show disabled users')).toBeLessThan(t.indexOf('Follow the fsp-widget-author skill'));
+  });
+
+  it('carries the workbench mode line so the skill answers with a pack, not files', () => {
+    const t = llmInput('# SKILL\nrules', 'Show disabled users');
+    expect(t).toContain(`${WORKBENCH_MODE_LINE}\n`);
+    expect(t.indexOf(WORKBENCH_MODE_LINE)).toBeLessThan(t.indexOf('# Requirement'));
+  });
+
+  it('includes the live backend API catalog between skill and requirement when synced', () => {
+    const catalog: BackendApi[] = [
+      {
+        controller: 'LedgerController', method: 'books', httpMethod: 'GET',
+        path: '/v1/tenants/{tenantId}/books', operationId: 'ledger.book.list',
+        permission: 'gl.account.view', component: 'ledger', risk: 'READ', title: 'List books',
+        params: [{ name: 'tenantId', type: 'UUID', location: 'path', required: true }],
+      },
+      {
+        controller: 'LedgerController', method: 'provisionDefaultCoa', httpMethod: 'POST',
+        path: '/v1/tenants/{tenantId}/books/{bookId}/provision-default-coa',
+        operationId: 'ledger.coa.provision', permission: 'gl.account.create', component: 'ledger',
+        risk: 'WRITE', title: 'Provision default CoA', params: [],
+      },
+    ];
+    const t = llmInput('# SKILL\nrules', '  Show my books  ', catalog);
+    expect(t.indexOf('# SKILL')).toBe(0);
+    expect(t).toContain('## Backend APIs the system provides right now');
+    expect(t).toContain('GET /v1/tenants/{tenantId}/books — LedgerController.books');
+    expect(t).toContain('PATH tenantId: UUID');
+    expect(t).toContain('POST /v1/tenants/{tenantId}/books/{bookId}/provision-default-coa');
+    expect(t.indexOf('## Backend APIs')).toBeLessThan(t.indexOf('# Requirement'));
+    expect(t).toContain('# Requirement\n\nShow my books\n');
+    expect(t).toContain('NEEDS BACKEND');
+    expect(t).toContain('=== BACKEND PROPOSAL ===');
+  });
+
+  it('omits the catalog section when no catalog was synced', () => {
+    const t = llmInput('# SKILL\nrules', 'Show disabled users');
+    expect(t).not.toContain('## Backend APIs the system provides right now');
+    expect(t.indexOf('# Requirement')).toBeGreaterThan(t.indexOf('# SKILL'));
+  });
+});
+
+describe('backendApiPromptSection', () => {
+  const catalog: BackendApi[] = [
+    {
+      controller: 'XController', method: 'list', httpMethod: 'GET',
+      path: '/v1/x/{id}', operationId: 'x.list', permission: 'x.view', component: 'x',
+      risk: 'READ', title: 'List X', params: [
+        { name: 'id', type: 'UUID', location: 'path', required: true },
+        { name: 'page', type: 'int', location: 'query', required: false },
+      ],
+    },
+  ];
+  it('renders method, path, metadata and params', () => {
+    const t = backendApiPromptSection(catalog);
+    expect(t).toContain('GET /v1/x/{id} — XController.list [op: x.list · perm: x.view · risk: READ]');
+    expect(t).toContain('PATH id: UUID');
+    expect(t).toContain('QUERY page: int (optional)');
+  });
+  it('handles empty catalog', () => {
+    expect(backendApiPromptSection([])).toContain('## Backend APIs the system provides right now');
+  });
+  it('lists proposed (unbuilt) APIs apart, never as callable', () => {
+    const t = backendApiPromptSection([
+      ...catalog,
+      { controller: PROPOSED_CONTROLLER, method: 'handler', httpMethod: 'GET', path: '/v1/inventory/low-stock',
+        operationId: null, permission: null, component: null, risk: null, title: 'low stock', params: [] },
+    ]);
+    const callable = t.slice(0, t.indexOf('### Proposed earlier'));
+    expect(callable).toContain('GET /v1/x/{id}');
+    expect(callable).not.toContain('/v1/inventory/low-stock');
+    expect(t).toContain('NOT built yet');
+    expect(t).toContain('- GET /v1/inventory/low-stock — low stock');
+  });
+  it('tells the LLM the live list supersedes §8 and to use /api paths', () => {
+    const t = backendApiPromptSection(catalog);
+    expect(t).toContain('SUPERSEDES');
+    expect(t).toContain('/api/ instead of /v1/');
+  });
+});
+
+describe('parseBackendProposal', () => {
+  const reply = `
+Some chat text
+=== BACKEND PROPOSAL ===
+NEW APIS:
+- POST /v1/inventory/low-stock — purpose: list items below min
+  request: { tenantId: UUID }
+  response: [ { sku, qty } ]
+  controller: InventoryController
+  method: lowStock
+- GET /v1/inventory/{sku} — purpose: read one item
+SERVER SIDE:
+- backend/core/src/main/java/com/fsp/core/inventory/InventoryController.java — add lowStock method
+=== END BACKEND PROPOSAL ===
+more chat
+`;
+  it('parses new APIs and server-side modifications', () => {
+    const r = parseBackendProposal(reply);
+    expect(r.ok).toBe(true);
+    expect(r.proposal).toBeDefined();
+    if (!r.proposal) return;
+    expect(r.proposal.newApis).toEqual([
+      {
+        httpMethod: 'POST', path: '/v1/inventory/low-stock', controller: 'InventoryController',
+        method: 'lowStock', operationId: null, purpose: 'list items below min',
+        request: '{ tenantId: UUID }', response: '[ { sku, qty } ]',
+      },
+      { httpMethod: 'GET', path: '/v1/inventory/{sku}', controller: null, method: null,
+        operationId: null, purpose: 'read one item', request: null, response: null },
+    ]);
+    expect(r.proposal.serverSide).toEqual([
+      'backend/core/src/main/java/com/fsp/core/inventory/InventoryController.java — add lowStock method',
+    ]);
+  });
+  it('no section is not an error', () => {
+    expect(parseBackendProposal('just a widget pack')).toEqual({ ok: true });
+  });
+  it('missing end marker is flagged but still parsed', () => {
+    const r = parseBackendProposal('x\n=== BACKEND PROPOSAL ===\nNEW APIS:\n- GET /v1/a\n');
+    expect(r.ok).toBe(true);
+    expect(r.issues).toHaveLength(1);
+    if (r.proposal) expect(r.proposal.newApis).toHaveLength(1);
   });
 });

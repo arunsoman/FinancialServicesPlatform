@@ -48,14 +48,21 @@ session is the only credential path (AGENTS §4).
 | Workbench page | URL | What it does |
 |---|---|---|
 | **Widget page** | `/widget-workbench/w/<id>` | the widget isolated: preview across every grid tier (xs→lg), the exact frames the builder will use, live/fixture data toggle, network table of the sources it calls |
-| **Registry** | `/widget-workbench/registry` | all widgets + the operations & permissions each one needs; a quick "who breaks if I rename a permission" view |
+| **Registry** | `/widget-workbench/registry` | all widgets + the operations & permissions each one needs; a quick "who breaks if I rename a permission" view. Sort by **creation time** (when core first registered the widget; `?sort=created-desc` / `created-asc` — newest first puts not-yet-registered widgets on top); needs a signed-in session |
 | **New widget (LLM)** | `/widget-workbench/new` | paste a widget pack; the page writes the files, type-checks, lints, registers and opens the preview. Bad packs are rejected with the rule they broke |
 | **Portal builder** | `/widget-workbench/builder` | assemble widgets into a portal layout (grid), then publish the layout to the gates/screens that consume it |
 
 ## 4. Way A — author a pack with an LLM (usual route)
 
-1. **Start the authoring skill.** In pi (or any agent that can read the repo):
-   load `docs/skills/fsp-widget-author/SKILL.md` and give it the requirement, e.g.
+0. **Sync the backend API catalog first.** Open **New widget (LLM)** and click **Sync backend APIs**.
+   It scans every `@RestController` in core (every `@FspOperation` handler), diffs against the previous
+   scan (additions / deletions / changed signatures show as +/–/changed badges) and stores the catalog in
+   the browser. Only after a successful sync does the requirement input unlock — the LLM prompt
+   (`Copy LLM input`) then carries **every path the system provides right now, with signatures**, so the
+   LLM matches against real endpoints instead of inventing them. Re-sync whenever controllers change.
+
+1. **Start the authoring skill.** Copy the LLM input (it carries `MODE: WORKBENCH-PACK`) into any chat LLM —
+   it follows `docs/skills/fsp-widget-author/SKILL.md` — with the requirement, e.g.
    *"a widget showing pending JE approvals for my tenant, with approve/reject"*.
    The skill answers with a **widget pack**: a `=== FSP-WIDGET-PACK v1 ===` block
    containing complete files (`index.tsx` manifest, `widget.tsx` component, `data.ts`
@@ -67,8 +74,25 @@ session is the only credential path (AGENTS §4).
 3. **Verify**: `bun run widgets:check` (registry coherence), `bun run lint`,
    `bun run typecheck`, `bun run test` (the pack may include a Vitest file), then look at
    the preview page — every grid tier, fixture and live mode.
-4. Register + place: `bun run widgets:register <id>` (or the page already did it), then
+4. Register + place: the page already registered it (or `bun run widgets:register-bff <id>`), then
    **Portal builder** to drop it into a layout and publish.
+
+## 4b. Way C — an agent with the repo (Claude Code, pi): end to end, two stages
+
+An agent that can read/write the repo and run commands uses **agent mode** of
+`.agents/skills/fsp-widget/SKILL.md` (also at `.claude/skills/fsp-widget`) and does the whole job:
+
+| Stage | Context | Ends with |
+|---|---|---|
+| **1 · UI/UX** | ui-std, design system, fixtures; backend facts only from `widgets:survey` / `widgets:dto` | widget built + `widgets:verify` green + workbench e2e green + **registered in core's widget registry** (`widgets:register-bff`) → presented for review; iterates until the user approves → `widgets:accept <id> --by "<who>"` (locks UI + wire contract) |
+| **2 · Backend** | backend/AGENTS.md, fapi2-compliance skill, AGENTS invariants | every NEW operation implemented to the approved shapes with tests → `widgets:skill` → live e2e (`widgets:e2e --lane all --live`) → `widgets:done` |
+
+State lives in the widget folder's `.widget-stage.json` (stage, REUSE/NEW operations sheet, verify /
+registration / e2e results pinned to a hash of the widget files, the approval). `bun run widgets:stage <id>`
+prints it with the open gate items. A Playwright spec per widget (`tests/e2e/widgets/<id>.spec.ts`,
+helpers in `tests/e2e/widget-support.ts`) runs a **workbench lane** (fixtures × every tier, geometry,
+gating, journeys) and a **portal lane** (real BFF sign-in; NEW operations stubbed from fixtures until
+stage 2 runs it `--live`).
 
 ## 5. Way B — author by hand (no LLM)
 
@@ -91,9 +115,21 @@ bun run workbench          # open the workbench (vite)
 bun run widgets:list       # registry + operations grid (terminal view)
 bun run widgets:check      # registry coherence — what CI runs too
 bun run widgets:gen <id>   # scaffold a fresh widget folder
-bun run widgets:register <id>   # PUT /v1/ui/widgets (needs services up)
-bun run widgets:skill      # regenerate docs/skills/fsp-widget-author/SKILL.md
-                           # from tools/widget-pack/SKILL.template.md (digest-pinned)
+bun run widgets:register <id>   # legacy: PUT straight to core :8081 — prefer widgets:register-bff
+bun run widgets:skill      # regenerate docs/skills/fsp-widget-author/SKILL.md + pack/endpoints.json
+                           # from the CODE (core @FspOperation + plugin manifests; no stack needed)
+bun run widgets:skill --check   # fails when endpoints.json/skill lag the code
+
+# agent mode (tools/widget-agent.ts) — compact output, logs in node_modules/.cache/fsp-widget-agent/
+bun run widgets:survey <terms…>          # operations, mapped names, permission keys, widgets, SME widgets
+bun run widgets:dto <Outer.Name> --ts    # backend DTO → TS interface
+bun run widgets:plan <id>                # REUSE / NEW operations sheet → .widget-stage.json
+bun run widgets:verify <id>              # code rules · widgets:check · tsc · eslint · vitest · freshness
+bun run widgets:e2e <id> --scaffold      # then: --lane workbench | portal | all  [--live]
+bun run widgets:register-bff <id>        # register via a real BFF session (Playwright, FAPI 2.0)
+bun run widgets:stage <id>               # where it is + what the next gate still needs
+bun run widgets:accept <id> --by "<who>" # user approved the UI → stage 2
+bun run widgets:done <id>                # stage-2 completion gate
 ```
 
 ## 7. Rules the builder enforces (why packs get rejected)
@@ -113,8 +149,43 @@ bun run widgets:skill      # regenerate docs/skills/fsp-widget-author/SKILL.md
 |---|---|
 | Workbench shows no widgets | registry empty → is a widget `index.tsx` failing to parse? `bun run widgets:check` names the offender |
 | Widget greyed out in builder palette | your signed-in user lacks a `requires` permission — sign in as a role that has it (see `docs/setup-guide.md` §5.1 credential table) |
-| **New widget** rejects pack with `NEEDS BACKEND` | the pack calls an endpoint not in the skill's catalog → a developer adds/extends the endpoint first, regenerate the skill with `bun run widgets:skill` (digest updates), retry |
+| **New widget** rejects pack with `NEEDS BACKEND` / "not an existing endpoint" | the pack calls an endpoint the code does not have → a developer adds it (or an agent runs stage 2), `bun run widgets:skill`, re-sync, retry. The validator checks against a fresh scan of the code, so a synced endpoint is never rejected as stale |
 | Live sources return 403 | expected — core re-checks RBAC; widget's `requires` doesn't match your role's grants |
 | Live sources return 401 | BFF session expired → re-login via the connection bar |
 | Register fails 400/404 | services down → full stack: `scripts\dev-windows.ps1 dev` (Windows) / make targets (Linux) |
 | Preview fine with fixtures, broken live | fixture shape drifted from the real response — fix `data.ts` mapping from the network table in the widget page |
+| **Every frame says `forbidden` on the widget page** | the widget's manifest lacks a cell that a mapped shared source's fixture checks (e.g. `ledger.books` needs `gl.account.view`) → add that cell to `requires` so the preview lane can grant it; real roles holding the primary cells are expected to hold supporting ones too (seed RBAC) |
+
+---
+
+### Workbench chrome
+
+- **Theme** (toggle in the connection bar): System / Light / Dark, persisted per browser (`fsp.wb-theme` in localStorage) and applied to `<html data-theme>` before first paint — the same contract the portals render from, so previews are tinted as shipped.
+- **Registry page**: search (label, id, `requires`, action cells) + category filter with a sticky header, so the 18-row table is scannable without scrolling.
+- **A11y**: skip-to-content link, `:focus-visible` rings on every control, frame status badges announce politely (`aria-live="polite"`).
+- **Every registered widget has default-lane fixtures** — no widget page may open as an error wall. `bun run widgets:check` guards registry coherence; open each widget page (or hit `/w/<id>?scenario=empty|error`) to verify the preview states.
+
+## 9. Agent Decision Guide & Workflow (When to Engage & When to Add Menu Items)
+
+AI agents working on feature requests or tasks must follow these rules:
+
+### 9.1 When to Engage with the Widget Pipeline
+Engage with the widget pipeline whenever a requirement involves any user-facing screen, component, form, queue, or data panel. Portals are 100% widget-composed; never build standalone pages outside the widget harness.
+
+### 9.2 When to Add a Menu Item (Implicit vs. Explicit)
+When a requirement specifies a new business capability (e.g. *"add VAS top-up"*, *"create settlement reconciliation view"*, *"implement inventory tracking"*), the agent must determine whether it warrants a new menu point:
+
+1. **New Operational Screen (ADD MENU ITEM):**
+   - The capability represents a distinct operational workflow or business domain.
+   - It is gated by its own permission cell (e.g. `vas.purchase`, `inventory.view`).
+   - **Action:**
+     1. Create the widget folder in `frontend/src/portals/shared/widgets/<area>/<name>/`.
+     2. Ensure permission exists in `permission-catalogue.ts`.
+     3. Add widget ID to `type MenuWidget` in `frontend/src/portals/shared/web-core/menu.ts`.
+     4. Add a new `MenuItem` to `MENU_ITEMS` in `menu.ts` (assigning icon, label, link, permission, target portals, and group).
+     5. Mount in `screens.tsx` (using `WidgetScreen`).
+2. **Domain Extension (ATTACH TO EXISTING SCREEN):**
+   - The feature is an additional KPI tile, chart, action, or sub-view within an existing domain (e.g., adding an extra balance card to Overview, or adding a filter/export to Journal Entries).
+   - **Action:** Add the widget to the existing screen's `widgets` array in `menu.ts` or enhance the existing widget component directly without creating duplicate menu clutter.
+3. **Verification Gate:**
+   - Always run `bun run widgets:check` and `bun run typecheck`.

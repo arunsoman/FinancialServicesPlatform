@@ -21,6 +21,7 @@ import { CaseToolbar } from './CaseToolbar';
 import {
   DEFAULT_QUERY, emptyForm, formFromView, isEditableStatus, isNotReady, parseListQuery, toProblem, useCase, useCaseCommand, useCasePage,
   useMasterValues,
+  useNextLevel,
 } from './model';
 import type { CaseFormValues, CaseSummary, Decision, ListQuery, SortKey } from './model';
 
@@ -35,7 +36,10 @@ export function KycManage() {
   const { port, context } = useWidgetRuntime();
   const held = context.permissions;
   // onboarding a child org is core's existing org.onboard_child (the plugin acts on-behalf)
-  const canCreate = held.includes('org.onboard_child');
+  const next = useNextLevel(port, context.orgId ?? '');
+  // only the CHILD level (core TenantLadder): offered once that level is known; a leaf org
+  // (merchant) onboards nothing — and never a sibling, while the level is still loading either
+  const canCreate = held.includes('org.onboard_child') && next.loaded && next.childSubType !== null;
 
   // ---- URL state
   const [params, setParams] = useSearchParams();
@@ -235,7 +239,7 @@ export function KycManage() {
         <Drawer
           wide
           title={openId === 'new' ? 'New KYC application' : editing ? `Edit ${view?.legalName ?? 'application'}` : view?.legalName ?? 'KYC case'}
-          subtitle={openId === 'new' ? 'Onboard an organization' : view ? `${view.caseNo} · ${view.registrationNumber}` : undefined}
+          subtitle={openId === 'new' ? 'Onboard an organization' : view ? [view.caseNo, view.registrationNumber].filter(Boolean).join(' · ') : undefined}
           onClose={requestClose}
           banner={
             confirmDiscard ? (
@@ -250,9 +254,11 @@ export function KycManage() {
           {openId === 'new' ? (
             canCreate ? (
               <CaseForm
-                key="new"
+                key={`new-${next.childSubType ?? ''}`}
                 mode="create"
-                initial={emptyForm()}
+                initial={{ ...emptyForm(), subType: next.childSubType ?? '' }}
+                lockedSubType={next.childSubType ?? undefined}
+                lockedSubTypeHint={next.label ? `Below ${next.orgName} you can onboard a ${next.label.toLowerCase()} only.` : undefined}
                 master={master.data}
                 masterLoading={master.isPending}
                 busy={cmd.isPending}

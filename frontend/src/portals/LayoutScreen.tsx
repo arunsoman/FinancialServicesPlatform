@@ -2,7 +2,7 @@
  * A screen of the published, signature-verified layout (/p/:menuId/:screenId — SME
  * LayoutPage). Guards in the same order as coded screens: session → eligibility → the
  * screen must show at least one widget the user may see. Each placed widget renders only
- * if this build has it AND the signed bundle approved it (signed-layout placedDef), and
+ * if this build has it AND the published menus list it (signed-layout placedDef), and
  * its host still gates on the user's permissions; core re-checks every call it makes.
  */
 import { Navigate, useParams } from 'react-router-dom';
@@ -13,12 +13,15 @@ import { LayoutGrid } from './shared/widgets/core/LayoutGrid';
 import type { LayoutGridCell } from './shared/widgets/core/LayoutGrid';
 import { WidgetHost } from './shared/widgets/core/host';
 import { getWidget } from './shared/widgets/registry';
-import { placedDef, screenVisible, signedSpan, useSignedLayout } from './signed/signed-layout';
+import { usePageSelection } from './shared/widgets/core/page-selection';
+import { placedDef, screenVisible, signedSpan, useMenuAccess, useSignedLayout } from './signed/signed-layout';
 
 export function LayoutScreen() {
   const { menuId, screenId } = useParams();
   const { status, permissions, eligible } = useSession();
   const layout = useSignedLayout();
+  const access = useMenuAccess();
+  const { selection, onSelect } = usePageSelection();
 
   if (status === 'loading') return <FullscreenSpinner label="Restoring session" />;
   if (status === 'anon') return <Navigate to="/login" replace />;
@@ -28,7 +31,7 @@ export function LayoutScreen() {
 
   const menu = layout.menus.find((m) => m.id === menuId);
   const screen = menu?.screens.find((s) => s.id === screenId);
-  if (!menu || !screen || !screenVisible(layout, screen, permissions, getWidget)) {
+  if (!menu || !screen || !screenVisible(layout, menu, screen, permissions, getWidget, access)) {
     return <Navigate to="/no-access" replace />;
   }
 
@@ -39,7 +42,11 @@ export function LayoutScreen() {
     cells.push({
       key: placed.id,
       span: (tier) => signedSpan(def, placed, tier),
-      render: () => <WidgetHost def={def} config={placed.config} />,
+      render: () => (
+        <div data-widget={def.id} className="min-w-0">
+          <WidgetHost def={def} config={placed.config} selection={selection} onSelect={onSelect} />
+        </div>
+      ),
     });
   }
 

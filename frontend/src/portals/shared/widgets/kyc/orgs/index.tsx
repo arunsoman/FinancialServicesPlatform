@@ -8,7 +8,7 @@ import { defineWidget } from '../../core/manifest';
 import { span } from '../../core/grid';
 const kycOrgsWidget = defineWidget({
   id: 'kyc.orgs',
-  version: '1.0.0',
+  version: '1.1.0',
   label: 'Organizations',
   description: 'The organization tree around you, each node with its KYC status.',
   category: 'Onboarding',

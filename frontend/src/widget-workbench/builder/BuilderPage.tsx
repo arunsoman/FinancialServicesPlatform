@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { apiGet } from '../../portals/shared/web-core/api';
+import { readProblem } from '../../portals/shared/web-core/api';
 import { TIERS } from '../../portals/shared/widgets/core/grid';
 import type { Tier } from '../../portals/shared/widgets/core/grid';
 import type { WidgetDef } from '../../portals/shared/widgets/core/manifest';
@@ -10,21 +9,21 @@ import { useConnection } from '../connection';
 import { BUILDER_PORTALS, TIER_LABEL, worksIn } from '../model';
 import { ArmButton } from './ArmButton';
 import { DesignCanvas } from './DesignCanvas';
-import { ExportPanel } from './ExportPanel';
 import { FindingList } from './FindingList';
 import {
-  loadLocalDraft, move, placeWidget, placedSpan, saveLocalDraft, screenResources, screenRoute, seedLayout, uniqueId,
-  validateLayout,
+  loadLocalDraft, move, parseLayout, placeWidget, placedSpan, saveLocalDraft, screenResources, screenRoute, seedLayout,
+  uniqueId, validateLayout,
 } from './layout';
 import type { LayoutMenu, LayoutScreen, PortalLayout } from './layout';
 import { MenuInspector } from './MenuInspector';
 import { MenuTree } from './MenuTree';
 import { PlacedInspector } from './PlacedInspector';
-import { PublishPanel } from './PublishPanel';
+import { PreviewButtons } from './PreviewButtons';
 import { ScreenInspector } from './ScreenInspector';
-import { BUILDER_VIEWS } from './selection';
-import type { BuilderView, Sel } from './selection';
-import { SidebarPreview } from './SidebarPreview';
+import type { Sel } from './selection';
+import { useSaveDraft, useServerLayouts } from './server-layouts';
+import { autosaveLabel, newestServerLayout, sameLayout } from './server-sync';
+import type { AutosaveState } from './server-sync';
 import { WidgetPalette } from './WidgetPalette';
 
 const DEFS: ReadonlyMap<string, WidgetDef> = new Map(WIDGETS.map((w) => [w.id, w]));
@@ -35,20 +34,21 @@ function firstScreen(l: PortalLayout): Sel {
 }
 
 /**
- * The portal builder (SME builder-page, FSP layout + four-eyes publish). A developer:
+ * The portal builder (SME builder-page). A developer:
  *  1. builds the portal's menus and submenus;
  *  2. opens a submenu's screen and drops widgets from the palette (this build's registry);
  *  3. sizes them per tier, phone first, and checks the screen at every tier;
- *  4. saves the draft on the server and submits it; another administrator approves it
- *     and core publishes + signs the portal's delivery bundle. Export downloads the JSON.
- * The editor's copy stays in this browser (localStorage) between visits.
+ *  4. previews the real portal at desktop / tablet / mobile size (new windows, live);
+ *  5. ships it: every edit autosaves to the server draft, and the menu-publisher skill
+ *     exports it into the repo seed that every environment applies (docs/portal-menus.md).
+ * The editor's copy stays in this browser (localStorage) between visits; with no copy here,
+ * the builder opens the server's newest layout (never the code's default menus over it).
  */
 export function BuilderPage() {
   const conn = useConnection();
   const [q, setQ] = useSearchParams();
   const portal = BUILDER_PORTALS.find((p) => p.key === q.get('portal')) ?? BUILDER_PORTALS[0];
   const tier: Tier = TIERS.includes(q.get('tier') as Tier) ? (q.get('tier') as Tier) : 'xs';
-  const view: BuilderView = BUILDER_VIEWS.some((v) => v.id === q.get('view')) ? (q.get('view') as BuilderView) : 'canvas';
   const setParam = (key: string, value: string | null) =>
     setQ(
       (p) => {
@@ -62,27 +62,84 @@ export function BuilderPage() {
 
   const [layout, setLayout] = useState<PortalLayout>(() => loadLocalDraft(portal.key) ?? seedLayout(portal, DEFS));
   const [sel, setSel] = useState<Sel>(() => firstScreen(layout));
+  // no editor copy in this browser → the layout came from the code's default menus; the server's
+  // newest layout replaces it once it loads, unless the developer has already edited
+  const [fromCode, setFromCode] = useState(() => loadLocalDraft(portal.key) === null);
+  // the layout as the server last had it: autosave runs only when the editor differs from it
+  const [savedJson, setSavedJson] = useState(() => JSON.stringify(layout));
   // switching portal loads that portal's editor copy (adjust state during render, not in an effect)
   const [shownPortal, setShownPortal] = useState(portal.key);
   if (shownPortal !== portal.key) {
-    const next = loadLocalDraft(portal.key) ?? seedLayout(portal, DEFS);
+    const local = loadLocalDraft(portal.key);
+    const next = local ?? seedLayout(portal, DEFS);
     setShownPortal(portal.key);
     setLayout(next);
     setSel(firstScreen(next));
+    setFromCode(local === null);
+    setSavedJson(JSON.stringify(next));
   }
-  useEffect(() => saveLocalDraft(layout), [layout]);
+  // never persist the code's untouched default menus: a later visit would take them for the
+  // developer's own work and autosave them over the server's layout
+  const untouchedDefault = fromCode && JSON.stringify(layout) === savedJson;
+  useEffect(() => {
+    if (!untouchedDefault) saveLocalDraft(layout);
+  }, [layout, untouchedDefault]);
 
-  const server = useQuery({
-    queryKey: ['ui', 'widgets', 'server'],
-    queryFn: () => apiGet<{ id: string }[]>('/api/ui/widgets'),
-    enabled: conn.status === 'connected',
-  });
-  const serverIds = useMemo(() => (server.data ? new Set(server.data.map((w) => w.id)) : null), [server.data]);
+  const canSave = conn.status === 'connected' && conn.canBuild;
+  const serverLayouts = useServerLayouts(portal.key, canSave);
+  const serverNewest = newestServerLayout(portal.key, serverLayouts.draft.data, serverLayouts.published.data);
+  if (fromCode && serverLayouts.draft.isFetched && serverLayouts.published.isFetched) {
+    setFromCode(false);
+    if (serverNewest && JSON.stringify(layout) === savedJson) {
+      setLayout(serverNewest);
+      setSel(firstScreen(serverNewest));
+      setSavedJson(JSON.stringify(serverNewest));
+    }
+  }
+
+  // the menus that ship today: core's PUBLISHED layout (every environment loads it from the repo seed)
+  const shipped = serverLayouts.published.data ? parseLayout(serverLayouts.published.data.layoutJson, portal.key) : null;
 
   const palette = useMemo(() => WIDGETS.filter((d) => worksIn(d, portal.context)), [portal.context]);
   const findings = useMemo(() => validateLayout(layout, DEFS, portal), [layout, portal]);
   const errors = findings.filter((f) => f.level === 'error').length;
   const warnings = findings.length - errors;
+
+  // ------------------------------------------------- autosave to the server draft (debounced)
+  const save = useSaveDraft(portal.key);
+  const [saveFail, setSaveFail] = useState<{ json: string; text: string } | null>(null);
+  const json = JSON.stringify(layout);
+  const dirty = json !== savedJson;
+  const blocked = !canSave || errors > 0 || fromCode;
+  useEffect(() => {
+    if (blocked || !dirty) return undefined;
+    const t = setTimeout(() => {
+      save.mutate(layout, {
+        onSuccess: () => {
+          setSavedJson(json);
+          setSaveFail(null);
+        },
+        onError: (e) => setSaveFail({ json, text: readProblem(e).detail }),
+      });
+    }, 1200);
+    return () => clearTimeout(t);
+    // `save` is a fresh object each render; the layout JSON is the trigger
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [json, blocked, dirty]);
+  const autosave: AutosaveState = !canSave
+    ? { kind: 'off', why: 'Sign in to save to the server' }
+    : errors > 0
+      ? { kind: 'off', why: 'Not saved: fix the errors first' }
+      : save.isPending
+        ? { kind: 'saving' }
+        : saveFail?.json === json
+          ? { kind: 'failed', text: saveFail.text }
+          : dirty
+            ? { kind: 'pending' }
+            : { kind: 'saved' };
+  // this browser's copy is not what the server holds (an older visit, another machine's edits):
+  // say so before the next edit autosaves over it
+  const serverDiffers = canSave && !fromCode && !dirty && !!serverNewest && !sameLayout(layout, serverNewest);
 
   const mi = sel ? sel.m : -1;
   const si = sel && sel.kind !== 'menu' ? sel.s : -1;
@@ -116,7 +173,6 @@ export function BuilderPage() {
       ms.screens.push({ id: uniqueId('new-screen', ms.screens.map((s) => s.id)), label: 'New screen', placedWidgets: [] });
     });
     setSel({ kind: 'screen', m, s: layout.menus[m].screens.length });
-    setParam('view', null);
   };
   const moveSel = (by: number) => {
     if (!sel) return;
@@ -176,20 +232,45 @@ export function BuilderPage() {
         </label>
         <span className="grow" />
         <span className={errors ? 'badge bad' : 'badge ok'}>{errors} error(s) · {warnings} warning(s)</span>
-        {conn.status === 'connected' && <span className="dim small">signed in as <b>{conn.who}</b></span>}
-        <button type="button" className="btn" onClick={() => setParam('view', 'publish')}>Publish</button>
-        <button type="button" className="btn" onClick={() => setParam('view', 'export')}>Export</button>
+        <span className={autosave.kind === 'failed' ? 'bad small' : 'dim small'} data-state={`autosave-${autosave.kind}`}>
+          {autosaveLabel(autosave)}
+        </span>
+        <PreviewButtons portalKey={portal.key} />
         <ArmButton
           className="btn ghost"
-          label="Reset to today's menus"
-          armedLabel="Click again: placed widgets are lost"
+          label="Discard my changes"
+          armedLabel="Click again: back to the shipped menus"
+          disabled={!shipped}
+          title={shipped ? 'Go back to the menus that ship today' : canSave ? 'Nothing has shipped for this portal yet' : 'Sign in to load the shipped menus'}
           onConfirm={() => {
-            const next = seedLayout(portal, DEFS);
-            setLayout(next);
-            setSel(firstScreen(next));
+            if (!shipped) return;
+            setLayout(shipped); // autosave then makes the shipped menus the server draft again
+            setSel(firstScreen(shipped));
           }}
         />
       </section>
+      <p className="dim small" data-state="ship-hint">
+        Every change saves automatically. To ship the menus, run the menu publisher (<span className="mono">make menus-publish</span>)
+        — CI/CD deploys them like any other code.
+      </p>
+
+      {serverDiffers && serverNewest && (
+        <p className="bad small" data-state="server-differs">
+          This browser’s copy of the {portalLabel} menus differs from the server’s newest layout — your next edit
+          would replace the server’s.{' '}
+          <button
+            type="button"
+            className="lnk"
+            onClick={() => {
+              setLayout(serverNewest);
+              setSel(firstScreen(serverNewest));
+              setSavedJson(JSON.stringify(serverNewest));
+            }}
+          >
+            Use the server’s layout
+          </button>
+        </p>
+      )}
 
       <div className="bd">
         <aside className="bd-left">
@@ -198,7 +279,6 @@ export function BuilderPage() {
             sel={sel}
             onSelect={(s) => {
               setSel(s);
-              if (s && s.kind !== 'menu') setParam('view', null);
             }}
             onAddMenu={addMenu}
             onAddScreen={addScreen}
@@ -216,24 +296,13 @@ export function BuilderPage() {
               setSel(null);
             }}
           />
-          <WidgetPalette widgets={palette} portalLabel={portalLabel} serverIds={serverIds} />
+          <WidgetPalette widgets={palette} portalLabel={portalLabel} />
         </aside>
 
         <main className="bd-mid">
-          <nav className="tabs">
-            {BUILDER_VIEWS.map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                className={view === v.id ? 'btn on' : 'btn'}
-                onClick={() => setParam('view', v.id === 'canvas' ? null : v.id)}
-              >
-                {v.label}
-              </button>
-            ))}
+          <nav className="tabs" aria-label="Screen size">
             <span className="grow" />
-            {view === 'canvas' &&
-              TIERS.map((t) => (
+            {TIERS.map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -245,8 +314,7 @@ export function BuilderPage() {
               ))}
           </nav>
 
-          {view === 'canvas' &&
-            (menu && screen ? (
+          {menu && screen ? (
               <>
                 <div className="crumb">
                   <span>{menu.label} › {screen.label}</span>
@@ -267,19 +335,7 @@ export function BuilderPage() {
               </>
             ) : (
               <div className="empty">Pick a submenu on the left to open its screen, or add one with “+ sub”.</div>
-            ))}
-          {view === 'sidebar' && <SidebarPreview layout={layout} portalLabel={portalLabel} />}
-          {view === 'publish' && (
-            <PublishPanel
-              layout={layout}
-              errorCount={errors}
-              onOpen={(l) => {
-                setLayout(l);
-                setSel(firstScreen(l));
-              }}
-            />
-          )}
-          {view === 'export' && <ExportPanel layout={layout} errorCount={errors} />}
+            )}
         </main>
 
         <aside className="bd-right">

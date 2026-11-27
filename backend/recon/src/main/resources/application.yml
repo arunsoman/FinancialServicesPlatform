@@ -1,0 +1,24 @@
+spring:
+  main:
+    web-application-type: none
+
+fsp:
+  recon:
+    # Stage 6 (docs/architecture/13 §8): probes the book-owner services' internal recon
+    # faces and pages core on violation. Cheaper PSP checks run every interval; the EMI
+    # custody deep probe runs daily (and once at boot).
+    sweep-interval-ms: ${FSP_RECON_SWEEP_MS:60000}
+    emi-base-url: ${FSP_EMI_URL:http://localhost:8086}
+    psp-base-url: ${FSP_PSP_URL:http://localhost:8085}
+    core-base-url: ${FSP_CORE_URL:http://localhost:8081}
+    # per-target credentials (red-team P0 fix): each book-owner service has its own secret
+    core-internal-credential: ${FSP_INTERNAL_CREDENTIAL_CORE:}
+    psp-internal-credential: ${FSP_INTERNAL_CREDENTIAL_PSP:}
+    emi-internal-credential: ${FSP_INTERNAL_CREDENTIAL_EMI:}
+    platform-tenant-id: ${FSP_RECON_TENANT_ID:00000000-0000-0000-0000-000000000001}
+    # P0 dedupe: the same violation key is paged at most once per window.
+    page-dedup-minutes: ${FSP_RECON_DEDUP_MIN:1440}
+
+logging:
+  pattern:
+    console: "ts=%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX,UTC} level=%p traceId=%X{traceId} tenantId=%X{tenantId} userId=%X{userId} logger=%c{1} msg=%m ex=%replace(%ex){'\n',' | '}%n"

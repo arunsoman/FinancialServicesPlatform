@@ -18,7 +18,7 @@ import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 public class BffSecurityConfig {
 
     @Bean
-    public SecurityFilterChain bffSecurityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain bffSecurityFilterChain(HttpSecurity http, BffProperties props) throws Exception {
         http.csrf(csrf -> csrf
                 .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
                 .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
@@ -27,5 +27,33 @@ public class BffSecurityConfig {
             .formLogin(f -> f.disable())
             .logout(l -> l.disable());
         return http.build();
+    }
+
+    /** Red-team (rounds 2–3) hardening: origin enforcement + baseline security headers. */
+    @Bean
+    public org.springframework.boot.web.servlet.FilterRegistrationBean<jakarta.servlet.Filter> bffHardeningFilter(BffProperties props) {
+        var reg = new org.springframework.boot.web.servlet.FilterRegistrationBean<jakarta.servlet.Filter>(
+            new OriginEnforcementFilter(props.getAllowedOrigins()));
+        reg.addUrlPatterns("/*");
+        reg.setOrder(10);
+        return reg;
+    }
+
+    /** Referrer-Policy + Permissions-Policy on every BFF response (round 2 wave 10a gap). */
+    @Bean
+    public org.springframework.boot.web.servlet.FilterRegistrationBean<jakarta.servlet.Filter> bffHeadersFilter() {
+        var reg = new org.springframework.boot.web.servlet.FilterRegistrationBean<jakarta.servlet.Filter>(
+            new jakarta.servlet.Filter() {
+                @Override public void doFilter(jakarta.servlet.ServletRequest req, jakarta.servlet.ServletResponse res,
+                                               jakarta.servlet.FilterChain chain) throws java.io.IOException, jakarta.servlet.ServletException {
+                    var r = (jakarta.servlet.http.HttpServletResponse) res;
+                    r.setHeader("Referrer-Policy", "no-referrer");
+                    r.setHeader("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
+                    chain.doFilter(req, res);
+                }
+            });
+        reg.addUrlPatterns("/*");
+        reg.setOrder(20);
+        return reg;
     }
 }

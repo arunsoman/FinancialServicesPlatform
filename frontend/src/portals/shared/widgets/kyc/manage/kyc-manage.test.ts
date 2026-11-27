@@ -90,3 +90,13 @@ describe('kyc fixture server (plugin contract)', () => {
     await expect(page(p, { page: '0', size: '25' })).rejects.toMatchObject({ status: 503, code: 'PLUGIN_NOT_READY' });
   });
 });
+
+describe('an org onboards its CHILD level only — never a sibling', () => {
+  it('a new application offers just the child level, and nothing while it is unknown', async () => {
+    const { subTypeOptions } = await import('./model');
+    // a distributor's child is a wholesaler: no DISTRIBUTOR (sibling), no MANUFACTURER (above)
+    expect(subTypeOptions('create', 'WHOLESALER', '').map((o) => o.value)).toEqual(['WHOLESALER']);
+    expect(subTypeOptions('create', undefined, '')).toEqual([]);
+    expect(subTypeOptions('edit', undefined, 'DISTRIBUTOR').map((o) => o.value)).toEqual(['DISTRIBUTOR']);
+  });
+});

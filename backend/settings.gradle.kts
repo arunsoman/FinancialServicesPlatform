@@ -6,5 +6,9 @@ include(
     "bff",
     "idp",
     "gateway",
-    "plugins:kyc"
+    "emi",
+    "psp",
+    "recon",
+    "plugins:kyc",
+    "plugins:inventory"
 )

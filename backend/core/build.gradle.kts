@@ -7,6 +7,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
 
+    // F-12 email channel (V29) — JavaMailSender/SMTP transport, the one accepted notify dependency
+    implementation("org.springframework.boot:spring-boot-starter-mail")
+
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
     // Boot 4 modularization: the Flyway AUTO-CONFIGURATION lives in this jar (raw flyway-core doesn't trigger it)

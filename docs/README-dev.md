@@ -1,85 +1,71 @@
-# FSP Phase-0 — Local Development Quickstart
+# FSP Phase-0 — Local Development & Build Guide
 
-## Stack
+> **Full bootJar runbook (rebuild → deploy → start → verify, Linux + Windows):** [runbook-fsp-local.md](runbook-fsp-local.md)
+> — includes per-target internal-credential envs, JDK-25 pin, profiles, start order, stop-all, health checklist, and the known-incident table (JDK mismatch, gateway catalog fail-closed, stale-checkout vs DB version skew).
 
-| Component | Technology | Where it runs |
-|---|---|---|
-| OLGP database | PostgreSQL 17 | Docker (`fsp-postgres` container, port 5432) |
-| Ledger | TigerBeetle 0.17.9 | **Host binary** (`infrastructure/bin/tigerbeetle`, port 3000) |
-| Core service | Spring Boot 4.0.9 (Java 25) | Host (`make backend-core`, port 8081) |
-| BFF | Spring Boot 4.0.9 (Java 25) | Host (`make backend-bff`, port 8080) |
-| SPA | React + Vite (Bun) | Host (`make frontend-dev`, port 5173) |
+## Architecture Ports & Topology
 
-## Setup (first time)
+| Service | Technology | Port | Command |
+|---|---|---|---|
+| PostgreSQL 17 | Docker container (`fsp-postgres`) | `5432` | `make infra-up` |
+| TigerBeetle 0.17.9 | Host binary (`infrastructure/bin/tigerbeetle`) | `3000` | `make tb-start` |
+| IdP | Native FSP IdP, Spring Boot (Java 25) | `8082` | `make backend-idp` |
+| Core | Spring Boot (Java 25, RBAC + Ledger) | `8081` | `make backend-core` |
+| API Gateway | Spring Cloud Gateway (sole public origin) | `8090` | `make backend-gateway` |
+| BFF | Spring Boot (Java 25, Session + CSRF) | `8080` | `make backend-bff` |
+| Plugin KYC | Spring Boot (Java 25, own DB `fsp_plugin_kyc`) | `8083` | `make backend-plugin-kyc` |
+| Frontend SPA | React 18 + Vite (Bun) | `5173` | `make frontend-dev` |
+
+---
+
+## Local Run Commands
 
 ```bash
-# 1. Install frontend deps
-make frontend-install
-
-# 2. Start PostgreSQL
-make infra-up
-
-# 3. Format + start TigerBeetle (host binary — no Docker needed)
-make tb-start
+make infra-up            # start PostgreSQL in Docker
+make tb-start            # start TigerBeetle host binary (port 3000)
+make backend-idp         # idp    :8082 (keys via make pki)
+make backend-core        # core   :8081 (add --spring.profiles.active=client-demo for demo seed)
+make backend-gateway     # gateway:8090 (catalog routes + JWT edge; start after core+idp)
+make backend-bff         # bff    :8080 (session; login = BFF -> gateway -> IdP)
+make backend-plugin-kyc  # plugin-kyc :8083 (KYC plugin)
+make frontend-dev        # spa    :5173 (bun)
+make stack-up            # OR: all services in docker (compose stack profile)
+make tb-reset            # wipe TigerBeetle ledger data
 ```
 
-## Run the stack
+---
+
+## Smoke Verification Chain
+
+1. `GET :8080/bff/csrf` — get CSRF token
+2. `POST :8080/bff/auth/login` — authenticate against IdP, session cookie issued
+3. `GET :8080/api/**` — BFF proxies to Gateway (`:8090`) with re-issued identity
+4. Direct `:8090/v1/**` — requires `Authorization: Bearer <token from /idp/token>`; unknown routes return `404 ROUTE_NOT_IN_CATALOG`
+
+### Credentials
+
+- **Dev Login (System Seed):** `platform-admin` / `fsp-admin` (or `$FSP_BOOTSTRAP_PASSWORD`)
+- **Demo Login (`client-demo` profile only):** `psp-admin`, `psp-ops`, `merchant-admin`, `merchant-checker` / `demo1234`
+- **Building a widget or changing a menu?** Follow [widget-workflow.md](widget-workflow.md): idea → UI on test data → approval → backend → builder → preview → menus as code → deploy, plus fixes for menu problems.
+- **Portal shows "No menu configured" or "Couldn’t load the menus"?** Restart core so it applies the menu seed, check the stack is up, and see [widget-workflow.md](widget-workflow.md#fixing-menu-problems).
+
+---
+
+## Toolchain & Build
+
+- **Java 25:** Temurin JDK 25 via `.sdkmanrc` (`sdk env`).
+- **Gradle 9.9.1:** Wrapper `./gradlew`.
+- **Bun:** Frontend uses `bun` (`bun install`, `bun run lint`, `bun run typecheck`, `bun run build`).
 
 ```bash
-# Terminal 1 (if not already running)
-make infra-up
-make tb-start
-
-# Terminal 2 — core service
-make backend-core
-
-# Terminal 3 — BFF
-make backend-bff
-
-# Terminal 4 — SPA
-make frontend-dev
-```
-
-- SPA: http://localhost:5173
-- BFF: http://localhost:8080
-- Core: http://localhost:8081
-
-## TigerBeetle notes
-
-- TigerBeetle runs as a **host binary** because Docker 25+ blocks `io_uring` by default (seccomp), which TigerBeetle requires. Running on the host keeps the setup simple.
-- Data file: `infrastructure/tigerbeetle-data/0_0.tigerbeetle`
-- Server log: `infrastructure/tigerbeetle-data/server.log`
-- Cluster id `0` is testing-only (warning is expected).
-- Reset: `make tb-reset` (creates a fresh formatted data file).
-
-Note: TigerBeetle clients must match the server version family. The core uses
-`com.tigerbeetle:tigerbeetle-java:0.17.9` to match the 0.17.9 server.
-
-## Reset everything
-
-```bash
-make stop-all     # stop TigerBeetle + PostgreSQL
-make clean        # also remove PostgreSQL volume
-make tb-reset     # wipe TigerBeetle data
-```
-
-## Java version
-
-The build requires **Java 25** (Temurin). A `.sdkmanrc` pins it for SDKMAN users:
-
-```bash
-source ~/.sdkman/bin/sdkman-init.sh
-sdk env install   # first time
-sdk env           # activate
-```
-
-Gradle 9.9.1 is used; the wrapper downloads it automatically.
-
-## Build
-
-```bash
+# Backend build & test
 cd backend
-./gradlew build          # compile + test
-./gradlew :core:bootJar  # core fat jar
-./gradlew :bff:bootJar   # BFF fat jar
+./gradlew check
+./gradlew build
+
+# Frontend build & check
+cd frontend
+bun run lint
+bun run typecheck
+bun run build
 ```

@@ -63,10 +63,47 @@ public class CoreClient {
             null, "kyc-verdict-" + approvalId));
     }
 
+    /** V2 → core V36: POST /v1/tenants/{t}/customers — the customer person, PENDING (DELEGATED). */
+    public Map<String, Object> createCustomer(UUID tenantId, Map<String, Object> body, String actorAssertion,
+                                              String idempotencyKey) {
+        return object(call(HttpMethod.POST, "/v1/tenants/" + tenantId + "/customers", body, actorAssertion, idempotencyKey));
+    }
+
+    /** GET /v1/tenants/{t}/customers/{p} — status + whether the contact is verified (DELEGATED). */
+    public Map<String, Object> getCustomer(UUID tenantId, UUID personId, String actorAssertion) {
+        return object(call(HttpMethod.GET, "/v1/tenants/" + tenantId + "/customers/" + personId, null,
+            actorAssertion, null));
+    }
+
+    /** POST /v1/tenants/{t}/persons/{p}/activation — re-send link/code to the primary contact (DELEGATED). */
+    public Map<String, Object> resendActivation(UUID tenantId, UUID personId, String actorAssertion,
+                                                String idempotencyKey) {
+        return object(call(HttpMethod.POST, "/v1/tenants/" + tenantId + "/persons/" + personId + "/activation",
+            Map.of(), actorAssertion, idempotencyKey));
+    }
+
+    /** POST /v1/tenants/{t}/customers/{p}/verification — the verdict, backed by the approval (MACHINE). */
+    public Map<String, Object> recordCustomerVerification(UUID tenantId, UUID personId, String verdict,
+                                                          UUID approvalId, String payloadHash) {
+        return object(call(HttpMethod.POST, "/v1/tenants/" + tenantId + "/customers/" + personId + "/verification",
+            Map.of("verdict", verdict, "approvalId", approvalId, "payloadHash", payloadHash),
+            null, "kyc-customer-verdict-" + approvalId));
+    }
+
     /** GET /v1/tenants/{id}/subtree — the person's reach (DELEGATED). */
     public Map<String, Object> getSubtree(UUID tenantId, int page, int size, String sort, String actorAssertion) {
         return object(call(HttpMethod.GET, "/v1/tenants/" + tenantId + "/subtree?page=" + page + "&size=" + size
             + "&sort=" + sort, null, actorAssertion, null));
+    }
+
+    /** GET /v1/tenants/{id} — one organization, visible only if the PERSON could see it (DELEGATED). */
+    public Map<String, Object> getTenant(UUID tenantId, String actorAssertion) {
+        return object(call(HttpMethod.GET, "/v1/tenants/" + tenantId, null, actorAssertion, null));
+    }
+
+    /** GET /v1/me/permissions as the acting person (DELEGATED): their keys and the checker flag. */
+    public Map<String, Object> me(String actorAssertion) {
+        return object(call(HttpMethod.GET, "/v1/me/permissions", null, actorAssertion, null));
     }
 
     /** Installations of this plugin awaiting readiness (MACHINE). */

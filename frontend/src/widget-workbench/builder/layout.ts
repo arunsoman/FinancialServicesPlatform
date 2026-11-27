@@ -9,7 +9,9 @@ import { TIERS } from '../../portals/shared/widgets/core/grid';
 import type { Tier } from '../../portals/shared/widgets/core/grid';
 import type { WidgetDef } from '../../portals/shared/widgets/core/manifest';
 import { cellsOf } from '../../portals/shared/widgets/core/manifest';
+import { builderDraftKey } from '../../portals/signed/preview';
 import { menuFor } from '../../portals/shared/web-core/menu';
+import type { MenuWidget } from '../../portals/shared/web-core/menu';
 import type { BuilderPortal } from '../model';
 import { worksIn } from '../model';
 
@@ -95,7 +97,7 @@ export function screenResources(screen: LayoutScreen, defs: ReadonlyMap<string, 
   return [...out];
 }
 
-/** "Reset to today's menus": the build-time menu registry, as a layout (SME seedLayout). */
+/** The build-time menu registry as a layout — the builder's starting point before the server's layout loads (SME seedLayout). */
 export function seedLayout(portal: BuilderPortal, defs: ReadonlyMap<string, WidgetDef>): PortalLayout {
   const menus: LayoutMenu[] = [];
   for (const item of menuFor(portal.menuPortal)) {
@@ -111,7 +113,16 @@ export function seedLayout(portal: BuilderPortal, defs: ReadonlyMap<string, Widg
       placedWidgets: item.widgets
         .map((w) => defs.get(w))
         .filter((d): d is WidgetDef => !!d)
-        .map(placeWidget),
+        .map((d) => {
+          const placed = placeWidget(d);
+          const menuConfig = item.config?.[d.id as MenuWidget];
+          const menuSpan = item.span?.[d.id as MenuWidget];
+          return {
+            ...placed,
+            ...(menuConfig ? { config: { ...placed.config, ...menuConfig } } : {}),
+            ...(menuSpan ? { span: { ...placed.span, ...menuSpan } } : {}),
+          };
+        }),
     });
   }
   return { portal: portal.key, menus };
@@ -192,7 +203,8 @@ export function move<T>(list: T[], from: number, to: number): void {
   list.splice(Math.max(0, Math.min(list.length, to)), 0, x);
 }
 
-const DRAFT = (portal: string) => `fsp.widget-workbench.builder.${portal}`;
+// shared with the portal's builder preview (it reads this copy, live)
+const DRAFT = builderDraftKey;
 
 /** Drafts are a per-browser convenience (the server draft is the shared copy). */
 export function loadLocalDraft(portalKey: string): PortalLayout | null {

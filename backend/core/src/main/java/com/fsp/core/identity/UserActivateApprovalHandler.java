@@ -21,6 +21,11 @@ public class UserActivateApprovalHandler implements ApprovalHandler {
     }
 
     @Override
+    public boolean atomicWithResolution() {
+        return true; // DB-only: the person change commits with the approval row or not at all
+    }
+
+    @Override
     public String operationType() {
         return ApprovalRequest.OpType.USER_ACTIVATE;
     }

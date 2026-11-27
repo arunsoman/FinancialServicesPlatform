@@ -1,0 +1,302 @@
+{
+  "id": "billing.invoices",
+  "stage": "done",
+  "ops": [
+    {
+      "name": "billing.invoices.list",
+      "kind": "source",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices",
+      "status": "REUSE",
+      "opId": "billing.invoices.list",
+      "permission": "invoice.view",
+      "risk": "READ"
+    },
+    {
+      "name": "billing.invoices.summary",
+      "kind": "source",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/summary",
+      "status": "REUSE",
+      "opId": "billing.invoices.summary",
+      "permission": "invoice.view",
+      "risk": "READ"
+    },
+    {
+      "name": "billing.invoices.get",
+      "kind": "source",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}",
+      "status": "REUSE",
+      "opId": "billing.invoices.get",
+      "permission": "invoice.view",
+      "risk": "READ"
+    },
+    {
+      "name": "billing.invoices.options",
+      "kind": "source",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/payment-options",
+      "status": "REUSE",
+      "opId": "billing.invoices.options",
+      "permission": "invoice.pay",
+      "risk": "READ"
+    },
+    {
+      "name": "billing.invoices.counterparties",
+      "kind": "source",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/counterparties",
+      "status": "REUSE",
+      "opId": "billing.invoices.counterparties",
+      "permission": "invoice.create",
+      "risk": "READ"
+    },
+    {
+      "name": "billing.invoices.create",
+      "kind": "command",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices",
+      "status": "REUSE",
+      "opId": "billing.invoices.create",
+      "permission": "invoice.create",
+      "risk": "WRITE"
+    },
+    {
+      "name": "billing.invoices.issue",
+      "kind": "command",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/issue",
+      "status": "REUSE",
+      "opId": "billing.invoices.issue",
+      "permission": "invoice.create",
+      "risk": "WRITE"
+    },
+    {
+      "name": "billing.invoices.pay",
+      "kind": "command",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/payments",
+      "status": "REUSE",
+      "opId": "billing.invoices.pay",
+      "permission": "invoice.pay",
+      "risk": "WRITE"
+    },
+    {
+      "name": "billing.invoices.confirm",
+      "kind": "command",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/payments/{paymentId}/confirm",
+      "status": "REUSE",
+      "opId": "billing.invoices.confirm",
+      "permission": "invoice.collect",
+      "risk": "WRITE"
+    },
+    {
+      "name": "billing.invoices.void",
+      "kind": "command",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/void",
+      "status": "REUSE",
+      "opId": "billing.invoices.void",
+      "permission": "invoice.void",
+      "risk": "FOUR_EYES"
+    }
+  ],
+  "createdAt": "2026-11-23T17:36:58.047Z",
+  "history": [
+    {
+      "at": "2026-11-23T17:36:58.047Z",
+      "event": "planned",
+      "detail": "Invoicing with 30-day credit terms by default and built-in payment options (e-money wallet, bank transfer, card via PSP hosted page), a menu entry in every portal, integrated with core"
+    },
+    {
+      "at": "2026-11-23T17:37:03.496Z",
+      "event": "ops-changed",
+      "detail": "billing.invoices.list:NEW billing.invoices.summary:NEW billing.invoices.get:NEW billing.invoices.payment-options:NEW billing.invoices.counterparties:NEW billing.invoices.create:NEW billing.invoices.issue:NEW billing.invoices.pay:NEW billing.invoices.confirm-payment:NEW billing.invoices.void:NEW"
+    },
+    {
+      "at": "2026-11-23T17:37:13.720Z",
+      "event": "verify-failed"
+    },
+    {
+      "at": "2026-11-23T17:37:19.256Z",
+      "event": "ops-changed",
+      "detail": "billing.invoices.list:NEW billing.invoices.summary:NEW billing.invoices.get:NEW billing.invoices.options:NEW billing.invoices.counterparties:NEW billing.invoices.create:NEW billing.invoices.issue:NEW billing.invoices.pay:NEW billing.invoices.confirm:NEW billing.invoices.void:NEW"
+    },
+    {
+      "at": "2026-11-23T17:37:27.996Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-23T17:45:34.988Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T17:48:01.130Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T17:48:34.365Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T17:49:03.614Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T17:49:47.555Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T17:50:38.234Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T17:52:07.301Z",
+      "event": "e2e-ok",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T17:52:20.986Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-23T17:55:16.901Z",
+      "event": "registered",
+      "detail": "billing.invoices@1.0.0 by platform-admin"
+    },
+    {
+      "at": "2026-11-23T17:58:37.359Z",
+      "event": "e2e-failed",
+      "detail": "portal"
+    },
+    {
+      "at": "2026-11-23T17:59:37.397Z",
+      "event": "e2e-failed",
+      "detail": "portal"
+    },
+    {
+      "at": "2026-11-23T18:00:12.567Z",
+      "event": "e2e-ok",
+      "detail": "workbench+portal"
+    },
+    {
+      "at": "2026-11-23T18:00:23.079Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-24T03:41:01.816Z",
+      "event": "ui-accepted",
+      "detail": "Arun Soman · NEW: billing.invoices.list, billing.invoices.summary, billing.invoices.get, billing.invoices.options, billing.invoices.counterparties, billing.invoices.create, billing.invoices.issue, billing.invoices.pay, billing.invoices.confirm, billing.invoices.void"
+    },
+    {
+      "at": "2026-11-24T04:03:23.298Z",
+      "event": "ops-changed",
+      "detail": "billing.invoices.list:REUSE billing.invoices.summary:REUSE billing.invoices.get:REUSE billing.invoices.options:REUSE billing.invoices.counterparties:REUSE billing.invoices.create:REUSE billing.invoices.issue:REUSE billing.invoices.pay:REUSE billing.invoices.confirm:REUSE billing.invoices.void:REUSE"
+    },
+    {
+      "at": "2026-11-24T04:03:35.056Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-24T04:04:33.257Z",
+      "event": "e2e-ok",
+      "detail": "workbench+portal live"
+    },
+    {
+      "at": "2026-11-24T04:04:55.379Z",
+      "event": "done"
+    },
+    {
+      "at": "2026-11-24T04:56:35.077Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-24T05:47:28.769Z",
+      "event": "e2e-ok",
+      "detail": "workbench+portal live"
+    }
+  ],
+  "requirement": "Invoicing with 30-day credit terms by default and built-in payment options (e-money wallet, bank transfer, card via PSP hosted page), a menu entry in every portal, integrated with core",
+  "verify": {
+    "at": "2026-11-24T04:56:35.077Z",
+    "ok": true,
+    "uiHash": "41e7d6082ca512c0",
+    "steps": [
+      {
+        "step": "operations + code rules",
+        "ok": true
+      },
+      {
+        "step": "widgets:check",
+        "ok": true
+      },
+      {
+        "step": "tsc --noEmit (widget scope)",
+        "ok": true
+      },
+      {
+        "step": "eslint",
+        "ok": true
+      },
+      {
+        "step": "vitest",
+        "ok": true
+      },
+      {
+        "step": "widgets:skill fresh",
+        "ok": true
+      }
+    ]
+  },
+  "e2e": {
+    "workbench": {
+      "at": "2026-11-24T05:47:28.769Z",
+      "ok": true,
+      "uiHash": "41e7d6082ca512c0"
+    },
+    "portal": {
+      "at": "2026-11-24T05:47:28.769Z",
+      "ok": true,
+      "uiHash": "41e7d6082ca512c0",
+      "live": true
+    }
+  },
+  "registered": {
+    "at": "2026-11-23T17:55:16.740Z",
+    "version": "1.0.0",
+    "by": "platform-admin",
+    "uiHash": "41e7d6082ca512c0"
+  },
+  "screen": {
+    "portalPath": "/admin",
+    "screenPath": "/admin/p/billing/invoices",
+    "user": "platform-admin"
+  },
+  "acceptance": {
+    "by": "Arun Soman",
+    "at": "2026-11-24T03:41:01.815Z",
+    "note": "approved in chat after workbench review on :5174",
+    "uiHash": "41e7d6082ca512c0",
+    "contractHash": "4f4402adda9b2f22",
+    "newOps": [
+      "billing.invoices.list",
+      "billing.invoices.summary",
+      "billing.invoices.get",
+      "billing.invoices.options",
+      "billing.invoices.counterparties",
+      "billing.invoices.create",
+      "billing.invoices.issue",
+      "billing.invoices.pay",
+      "billing.invoices.confirm",
+      "billing.invoices.void"
+    ]
+  }
+}

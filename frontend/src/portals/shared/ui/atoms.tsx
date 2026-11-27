@@ -5,7 +5,8 @@
  * screens never hardcode a color.
  */
 import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
-import { forwardRef } from 'react';
+import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
+import type { MouseEvent } from 'react';
 import { clsx } from 'clsx';
 import { statusStyle } from '../ui/status-maps';
 import type { StatusTone } from '../ui/status-maps';
@@ -15,9 +16,30 @@ type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'plain';
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
 }
+/**
+ * An `onClick` that returns a Promise disables the button until it settles (one press = one
+ * action). The global submit guard (web-core/submit-guard.ts) additionally drops repeat clicks
+ * and holds the button while any mutation it started is in flight.
+ */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = 'plain', className, ...rest }, ref,
+  { variant = 'plain', className, onClick, disabled, ...rest }, ref,
 ) {
+  const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  const handleClick = useCallback((e: MouseEvent<HTMLButtonElement>) => {
+    if (pendingRef.current) { e.preventDefault(); return; }
+    const out: unknown = onClick?.(e);
+    if (!(out instanceof Promise)) return;
+    pendingRef.current = true;
+    setPending(true);
+    const done = () => {
+      pendingRef.current = false;
+      if (mounted.current) setPending(false);
+    };
+    out.then(done, done);
+  }, [onClick]);
   return (
     <button
       ref={ref}
@@ -28,6 +50,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
         variant === 'ghost' && 'fsp-btn-ghost',
         className,
       )}
+      disabled={disabled || pending}
+      aria-busy={pending || undefined}
+      onClick={handleClick}
       {...rest}
     />
   );

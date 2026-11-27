@@ -164,8 +164,8 @@ public final class JwtService {
         if (raw.length != componentLen * 2) {
             throw new IllegalArgumentException("raw signature length mismatch");
         }
-        byte[] r = positive(raw, 0, componentLen, componentLen);
-        byte[] s = positive(raw, componentLen, componentLen, componentLen);
+        byte[] r = derIntegerContent(raw, 0, componentLen);
+        byte[] s = derIntegerContent(raw, componentLen, componentLen);
         byte[] der = new byte[6 + r.length + s.length];
         int i = 0;
         der[i++] = 0x30; der[i++] = (byte) (der.length - 2);
@@ -174,6 +174,21 @@ public final class JwtService {
         der[i++] = 0x02; der[i++] = (byte) s.length;
         System.arraycopy(s, 0, der, i, s.length);
         return der;
+    }
+
+    /**
+     * DER INTEGER content for a non-negative big-endian value: strip redundant leading
+     * zeros, then RE-ADD a 0x00 sign byte when the first remaining byte has its high bit
+     * set — without it the value decodes as NEGATIVE and ES256 verification fails (~0.8%
+     * of random r/s values, seen as intermittent gateway_dpop_signature_invalid).
+     */
+    private static byte[] derIntegerContent(byte[] raw, int off, int len) {
+        while (len > 0 && raw[off] == 0) { off++; len--; }
+        if (len == 0) return new byte[] { 0 }; // value 0 → single zero byte
+        boolean needsSign = (raw[off] & 0x80) != 0;
+        byte[] out = new byte[len + (needsSign ? 1 : 0)];
+        System.arraycopy(raw, off, out, out.length - len, len);
+        return out;
     }
 
     /** Convert a JCA DER ECDSA signature into JWS raw form (componentLen bytes each). */

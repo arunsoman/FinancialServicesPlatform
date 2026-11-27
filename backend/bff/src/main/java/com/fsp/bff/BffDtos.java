@@ -12,7 +12,8 @@ public final class BffDtos {
 
     public record LoginRequest(String username, String password) {}
 
-    public record SessionResponse(boolean authenticated, SessionUser user) {}
+    /** idleTimeoutSeconds: sign out after this much user inactivity; sessionEndsAt: absolute end (ISO-8601). */
+    public record SessionResponse(boolean authenticated, SessionUser user, Integer idleTimeoutSeconds, String sessionEndsAt) {}
 
     public record CsrfResponse(String headerName, String token) {}
 }

@@ -5,6 +5,7 @@ import com.fsp.core.approval.ApprovalRequest;
 import com.fsp.core.approval.ApprovalService;
 import com.fsp.core.common.Actor;
 import com.fsp.core.common.ApiException;
+import com.fsp.core.common.KeyLocks;
 import com.fsp.core.rbac.PermissionService;
 import com.fsp.core.tenant.TenantRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -31,16 +32,19 @@ public class PortalLayoutService {
     private final ApprovalService approvals;
     private final ApprovalRequestRepository approvalRequests;
     private final LayoutValidator validator;
+    private final KeyLocks keyLocks;
 
     public PortalLayoutService(UiLayoutRepository layouts, TenantRepository tenants,
                                PermissionService permissions, ApprovalService approvals,
-                               ApprovalRequestRepository approvalRequests, LayoutValidator validator) {
+                               ApprovalRequestRepository approvalRequests, LayoutValidator validator,
+                               KeyLocks keyLocks) {
         this.layouts = layouts;
         this.tenants = tenants;
         this.permissions = permissions;
         this.approvals = approvals;
         this.approvalRequests = approvalRequests;
         this.validator = validator;
+        this.keyLocks = keyLocks;
     }
 
     @Transactional
@@ -59,6 +63,15 @@ public class PortalLayoutService {
                 fresh.createdAt = Instant.now();
                 return fresh;
             });
+        // Draft lock while publishing (maker-checker integrity): once the maker submits for
+        // approval, the draft row MUST NOT mutate — the checker decides on the submitted
+        // snapshot and the handler publishes that snapshot, never a later silent edit.
+        if (approvalRequests.existsByOperationTypeAndTargetResourceIdAndStatus(
+            ApprovalRequest.OpType.UI_LAYOUT_PUBLISH, row.id, ApprovalRequest.Status.PENDING_CHECKER)) {
+            log.warn("ui_layout_save_locked portal={} layoutId={} actor={}", portal, row.id, actor.username());
+            throw ApiException.conflict("APPROVAL_STATE",
+                "Draft is locked while its publish approval is pending; approve or reject it first");
+        }
         row.layoutJson = normalized;
         row.schemaVersion = req.schemaVersion();
         row.makerId = actor.personId();
@@ -73,21 +86,26 @@ public class PortalLayoutService {
         requireManage(actor);
         UiLayout draft = layouts.findFirstByPortalAndStatus(portal, UiLayout.Status.DRAFT)
             .orElseThrow(() -> ApiException.notFound("UI_LAYOUT_NO_DRAFT", "No draft layout for " + portal));
-        boolean pending = approvalRequests.existsByOperationTypeAndTargetResourceIdAndStatus(
-            ApprovalRequest.OpType.UI_LAYOUT_PUBLISH, draft.id, ApprovalRequest.Status.PENDING_CHECKER);
-        if (pending) {
-            log.warn("ui_layout_submit_conflict portal={} layoutId={} actor={}", portal, draft.id, actor.username());
-            throw ApiException.conflict("APPROVAL_STATE", "A publish approval is already pending for this draft");
-        }
-        UUID rootTenantId = rootTenantId();
-        var approval = approvals.open(rootTenantId, ApprovalRequest.OpType.UI_LAYOUT_PUBLISH,
-            draft.id, actor, "Publish portal layout '" + portal + "'", draft.layoutJson);
-        draft.publishedApprovalId = approval.id;
-        draft.updatedAt = Instant.now();
-        layouts.save(draft);
-        log.info("ui_layout_submitted portal={} layoutId={} approvalId={} maker={}",
-            portal, draft.id, approval.id, actor.username());
-        return draft;
+        // Serialize per draft id (§2d): the pending-existence check + open must be one step,
+        // so two concurrent submits cannot open two UI_LAYOUT_PUBLISH rows for one draft
+        // (backed by the partial unique index in V27).
+        return keyLocks.withLock("ui-layout", draft.id, () -> {
+            boolean pending = approvalRequests.existsByOperationTypeAndTargetResourceIdAndStatus(
+                ApprovalRequest.OpType.UI_LAYOUT_PUBLISH, draft.id, ApprovalRequest.Status.PENDING_CHECKER);
+            if (pending) {
+                log.warn("ui_layout_submit_conflict portal={} layoutId={} actor={}", portal, draft.id, actor.username());
+                throw ApiException.conflict("APPROVAL_STATE", "A publish approval is already pending for this draft");
+            }
+            UUID rootTenantId = rootTenantId();
+            var approval = approvals.open(rootTenantId, ApprovalRequest.OpType.UI_LAYOUT_PUBLISH,
+                draft.id, actor, "Publish portal layout '" + portal + "'", draft.layoutJson);
+            draft.publishedApprovalId = approval.id;
+            draft.updatedAt = Instant.now();
+            layouts.save(draft);
+            log.info("ui_layout_submitted portal={} layoutId={} approvalId={} maker={}",
+                portal, draft.id, approval.id, actor.username());
+            return draft;
+        });
     }
 
     @Transactional(readOnly = true)

@@ -1,5 +1,17 @@
 # PSP and EMI Service Provider Compliance Obligations
 
+> **⚠️ AMENDMENT (2026-11-19):** this document was drafted against the **EU directives
+> (EMD2/PSD2)** as generic industry grounding. The platform's operative jurisdiction is
+> **Namibia**: the binding instruments are **PSD-1** (PSP licensing, Payment System
+> Management Act 14/2023), **PSD-3** (e-money, GN 561/2024), and the **Virtual Assets
+> Act 10/2023 + BoN Custody Rules (GN 515/2023)**. Where EMD2/PSD2 sections below overlap,
+> the **determinations govern** (e.g. NAD-only wallets, PSD-3 §9.1.1 replaces EMD2
+> denomination freedom; PSD-1 §12/§13 replaces PSD2 safeguarding categories). The full
+> resolved regulatory mapping lives in
+> [plans/bank-connectors-bill-payments-plan.md §12](bank-connectors-bill-payments-plan.md)
+> and [architecture chapter 13](../docs/architecture/13-money-movement-and-rails.md)
+> (§12.7 traceability table). EU sections are retained below as reference only.
+
 ## Document Information
 - **Version:** 1.0
 - **Date:** 2025-01-01

@@ -1,26 +1,20 @@
 /**
- * bun run widgets:skill — regenerates the widget-author skill from core's LIVE operation catalog.
+ * bun run widgets:skill — regenerates the chat-LLM widget-author skill from the CODE-DERIVED
+ * operation catalog (tools/widget-pack/catalog.ts: core @FspOperation handlers + plugin
+ * manifests). No running stack needed, and the workbench validator reads the same scan, so the
+ * prompt and the validator can never disagree.
  *
- *   1. GET core /internal/ops/catalog  (core @FspOperation routes; dev internal credential)
- *   2. GET core /internal/ops/plugins  (registered plugin manifests' operations)
- *   3. writes src/widget-workbench/pack/endpoints.json  (the validator's allow-list)
- *   4. renders docs/skills/fsp-widget-author/SKILL.md from SKILL.template.md
+ *   1. scans backend/core controllers + backend/plugins/<code>/plugin-manifest.json
+ *   2. writes src/widget-workbench/pack/endpoints.json (reference copy + digest)
+ *   3. renders docs/skills/fsp-widget-author/SKILL.md from SKILL.template.md
  *
- * Env: FSP_CORE_URL (default http://localhost:8081), FSP_INTERNAL_CREDENTIAL (dev default).
- * Run it whenever endpoints change; commit both outputs.
+ *   bun run widgets:skill            regenerate both outputs
+ *   bun run widgets:skill --check    exit 1 when the committed outputs are stale (CI / verify)
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-interface Endpoint {
-  id: string;
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  path: string;
-  permission: string;
-  risk: string;
-  title: string;
-}
+import { digestOf, endpointsOf, scanCatalog } from './catalog';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FRONTEND = join(HERE, '..', '..');
@@ -29,56 +23,23 @@ const ENDPOINTS_FILE = join(FRONTEND, 'src', 'widget-workbench', 'pack', 'endpoi
 const SKILL_FILE = join(REPO, 'docs', 'skills', 'fsp-widget-author', 'SKILL.md');
 const TEMPLATE = join(HERE, 'SKILL.template.md');
 
-const CORE = process.env.FSP_CORE_URL ?? 'http://localhost:8081';
-const CRED = process.env.FSP_INTERNAL_CREDENTIAL ?? 'dev-internal-credential';
+function main() {
+  const check = process.argv.includes('--check');
+  const endpoints = endpointsOf(scanCatalog(REPO));
+  const digest = digestOf(endpoints);
 
-/** Machine-only, platform-plumbing or builder operations a portal widget must never call. */
-const EXCLUDED = [
-  /^approval\.open$/, /^approval\.plugin\./, /^plugin\.events\./, /^plugin\.installation\.(provisioning|ready)$/,
-  /^tenant\.verification\./, /^tenant\.child\.create$/, /^ui\./, /^plugin\.register$/, /^plugin\.type\./,
-  /^tenant\.act-as\./,
-];
-
-async function getJson(path: string): Promise<unknown> {
-  const res = await fetch(CORE + path, { headers: { 'X-FSP-Internal-Credential': CRED } });
-  if (!res.ok) throw new Error(`${path} → HTTP ${res.status} (is core running on ${CORE}?)`);
-  return res.json();
-}
-
-const toApi = (v1: string) => v1.replace(/^\/v1\//, '/api/');
-
-async function main() {
-  const catalog = (await getJson('/internal/ops/catalog')) as {
-    digest: string;
-    operations: { operationId: string; method: string; pathPattern: string; permission: string; risk: string; title: string }[];
-  };
-  const plugins = (await getJson('/internal/ops/plugins')) as Record<
-    string,
-    { operations?: { id: string; method: string; path: string; permission: string }[] } | string
-  >;
-
-  const endpoints: Endpoint[] = [];
-  for (const op of catalog.operations) {
-    if (!op.pathPattern.startsWith('/v1/') || EXCLUDED.some((r) => r.test(op.operationId))) continue;
-    endpoints.push({
-      id: op.operationId, method: op.method.toUpperCase() as Endpoint['method'], path: toApi(op.pathPattern),
-      permission: op.permission ?? '', risk: op.risk ?? 'READ', title: op.title ?? '',
-    });
-  }
-  for (const [code, v] of Object.entries(plugins)) {
-    if (typeof v === 'string') continue;
-    for (const op of v.operations ?? []) {
-      const method = op.method.toUpperCase() as Endpoint['method'];
-      endpoints.push({
-        id: op.id, method, path: toApi(op.path), permission: op.permission,
-        risk: method === 'GET' ? 'READ' : 'WRITE', title: `${code} plugin: ${op.id}`,
-      });
+  if (check) {
+    const current = existsSync(ENDPOINTS_FILE) ? (JSON.parse(readFileSync(ENDPOINTS_FILE, 'utf8')) as { digest?: string }).digest : null;
+    if (current !== digest) {
+      console.error(`widgets:skill --check — STALE: endpoints.json digest ${String(current).slice(0, 12)} ≠ code ${digest.slice(0, 12)}. Run: bun run widgets:skill`);
+      process.exit(1);
     }
+    console.log(`widgets:skill --check — up to date (${endpoints.length} endpoints, digest ${digest.slice(0, 12)})`);
+    return;
   }
-  endpoints.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
 
   mkdirSync(dirname(ENDPOINTS_FILE), { recursive: true });
-  writeFileSync(ENDPOINTS_FILE, JSON.stringify({ digest: catalog.digest, endpoints }, null, 2) + '\n');
+  writeFileSync(ENDPOINTS_FILE, JSON.stringify({ digest, endpoints }, null, 2) + '\n');
 
   const table = [
     '| Method | BFF path | perm | risk | what |',
@@ -89,13 +50,10 @@ async function main() {
   const skill = readFileSync(TEMPLATE, 'utf8')
     .replace('{{ENDPOINTS}}', table)
     .replace('{{GENERATED_AT}}', new Date().toISOString().slice(0, 10))
-    .replace('{{CATALOG_DIGEST}}', catalog.digest.slice(0, 12));
+    .replace('{{CATALOG_DIGEST}}', digest.slice(0, 12));
   mkdirSync(dirname(SKILL_FILE), { recursive: true });
   writeFileSync(SKILL_FILE, skill);
   console.log(`widgets:skill — ${endpoints.length} endpoints → ${ENDPOINTS_FILE}\n               skill → ${SKILL_FILE}`);
 }
 
-main().catch((e: unknown) => {
-  console.error(`widgets:skill failed: ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(1);
-});
+main();

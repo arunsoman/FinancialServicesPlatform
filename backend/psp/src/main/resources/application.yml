@@ -1,0 +1,42 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: fsp-psp
+  datasource:
+    url: ${FSP_PSP_DB_URL:jdbc:postgresql://localhost:5432/fsp_psp}
+    username: ${FSP_PSP_DB_USER:fsp_psp}
+    password: ${FSP_PSP_DB_PASSWORD:fsp_psp}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration
+
+fsp:
+  psp:
+    # per-target secret — PSP's own inbound credential (red-team P0 fix, fail-closed)
+    internal-credential: ${FSP_INTERNAL_CREDENTIAL_PSP:}
+    tigerbeetle:
+      addresses: ${FSP_TB_ADDRESSES:127.0.0.1:3000}
+      cluster-id: ${FSP_PSP_TB_CLUSTER_ID:0}
+      # PSP book — nominal clearing positions live here and MUST be zero each cycle.
+      book-id: ${FSP_PSP_TB_BOOK_ID:805}
+    settlement:
+      # PSD-1 §12.2.3: merchant pay-over within 2 business days — our sweep beats it.
+      pay-over-days: ${FSP_PSP_PAY_OVER_DAYS:2}
+      # Two-phase capture pending timeout (sweep beats it; expiry repairs to VOIDED).
+      settle-grace-seconds: ${FSP_PSP_SETTLE_GRACE_SECONDS:172800}
+      sweep-interval-ms: ${FSP_PSP_SETTLE_SWEEP_MS:60000}
+      sweep-initial-delay-ms: ${FSP_PSP_SETTLE_SWEEP_INITIAL_MS:30000}
+    acquire:
+      max-movement-minor: ${FSP_PSP_MAX_MOVEMENT:100000000}
+    outbox:
+      sweep-interval: ${FSP_PSP_OUTBOX_SWEEP_MS:500}
+      sweep-initial-delay-ms: ${FSP_PSP_OUTBOX_SWEEP_INITIAL_MS:3000}
+
+logging:
+  pattern:
+    console: "ts=%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX,UTC} level=%p traceId=%X{traceId} tenantId=%X{tenantId} userId=%X{userId} logger=%c{1} msg=%m ex=%replace(%ex){'\n',' | '}%n"

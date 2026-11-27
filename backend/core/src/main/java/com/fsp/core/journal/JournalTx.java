@@ -61,6 +61,19 @@ public class JournalTx {
         return snapshot(je);
     }
 
+    /** Posting intents: a validated, already-planned entry enters the state machine at
+     *  PENDING_CHECKER — the acting person occupies both maker and checker planes by design
+     *  (je.post.immediate is a separately-grantable permission; plan persisted in the same tx). */
+    @Transactional
+    public Snapshot persistIntent(JournalEntry entry, List<JournalLine> lines) {
+        entryRepository.save(entry);
+        lineRepository.saveAll(lines);
+        audit.record(entry.makerId, null, entry.tenantId, entry.bookId, "JE_INTENT_PREPARED", "JOURNAL_ENTRY",
+            entry.id.toString(), audit.hashState("null"), audit.hashState("status=PENDING_CHECKER"), false);
+        outbox.record("JournalEntry", entry.id, "JournalEntry.IntentPrepared", snapshot(entry).payload());
+        return snapshot(entry);
+    }
+
     /** COMMIT_UNKNOWN → FINALIZED after lookup confirmed the original ids (recovery path). */
     @Transactional
     public Snapshot finalizeFromUnknown(UUID entryId) {

@@ -14,7 +14,13 @@ public final class TenantDtos {
 
     public record TenantView(UUID id, UUID parentTenantId, String hierarchyPath, int depth,
                              String type, String subType, String status, String verificationStatus,
-                             String legalName, Instant createdAt) {}
+                             String legalName, Instant createdAt,
+                             /* the only sub-type this org may onboard (TenantLadder); null = none */
+                             String childSubType) {}
+
+    /** One server page of an org's children (onboard.list). */
+    public record ChildPage(java.util.List<TenantView> items, int page, int size, boolean hasNext,
+                            String sort, String q) {}
 
     public record PspCreated(UUID tenantId, String adminUsername, String checkerUsername,
                              String note) {}

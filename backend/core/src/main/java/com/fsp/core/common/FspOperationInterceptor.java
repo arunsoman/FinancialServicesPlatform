@@ -20,6 +20,8 @@ import java.util.UUID;
  *  - op.actors() defaults to {PERSON} — existing declarations are unchanged
  *  - MACHINE actors are checked against client_grants (not person RBAC)
  *  - DELEGATED actors are checked against BOTH person RBAC and client grant
+ *  - ACTING (act-as) is admitted wherever PERSON is — it is the same signed-in person — and is
+ *    checked against person RBAC, which PermissionService caps by the target tenant's ceiling
  */
 @Slf4j
 public class FspOperationInterceptor implements HandlerInterceptor {
@@ -50,7 +52,11 @@ public class FspOperationInterceptor implements HandlerInterceptor {
         // 1. Actor plane must be admitted for this operation
         boolean admitted = false;
         for (Actor.ActorType allowed : op.actors()) {
-            if (allowed == actor.type()) { admitted = true; break; }
+            if (allowed == actor.type()
+                || (actor.type() == Actor.ActorType.ACTING && allowed == Actor.ActorType.PERSON)) {
+                admitted = true;
+                break;
+            }
         }
         if (!admitted) {
             log.warn("actor_type_rejected op={} actorType={} path={}", op.id(), actor.type(), request.getRequestURI());
@@ -62,7 +68,7 @@ public class FspOperationInterceptor implements HandlerInterceptor {
 
         // 2. Permission check by plane
         switch (actor.type()) {
-            case PERSON -> {
+            case PERSON, ACTING -> {
                 if (!op.permission().isBlank()) {
                     permissions.require(actor, op.permission(), tenantId);
                 }

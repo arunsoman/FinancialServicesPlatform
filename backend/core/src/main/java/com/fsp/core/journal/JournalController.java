@@ -28,6 +28,7 @@ public class JournalController {
 
     @PostMapping("/v1/tenants/{tenantId}/journal-entries")
     @FspOperation(id = "journal.entry.create", permission = "je.create", component = "journal",
+        actors = {Actor.ActorType.PERSON, Actor.ActorType.DELEGATED},
         risk = FspOperation.OperationRisk.WRITE, title = "Create journal entry draft")
     public JournalDtos.EntryView create(jakarta.servlet.http.HttpServletRequest request, @PathVariable("tenantId") UUID tenantId,
                                         @RequestBody JournalDtos.CreateEntryRequest body) {
@@ -67,6 +68,7 @@ public class JournalController {
 
     @PostMapping("/v1/tenants/{tenantId}/journal-entries/{entryId}/submit-for-approval")
     @FspOperation(id = "journal.entry.submit", permission = "je.create", component = "journal",
+        actors = {Actor.ActorType.PERSON, Actor.ActorType.DELEGATED},
         risk = FspOperation.OperationRisk.WRITE, title = "Submit JE for approval")
     public JournalDtos.EntryView submit(jakarta.servlet.http.HttpServletRequest request, @PathVariable("tenantId") UUID tenantId,
                                         @PathVariable("entryId") UUID entryId) {
@@ -77,6 +79,7 @@ public class JournalController {
 
     @PostMapping("/v1/tenants/{tenantId}/journal-entries/{entryId}/approve")
     @FspOperation(id = "journal.entry.approve", permission = "je.approve", component = "journal",
+        actors = {Actor.ActorType.PERSON, Actor.ActorType.DELEGATED},
         risk = FspOperation.OperationRisk.FOUR_EYES, title = "Approve and post JE")
     public JournalDtos.EntryView approve(jakarta.servlet.http.HttpServletRequest request, @PathVariable("tenantId") UUID tenantId,
                                          @PathVariable("entryId") UUID entryId) {
@@ -87,12 +90,27 @@ public class JournalController {
 
     @PostMapping("/v1/tenants/{tenantId}/journal-entries/{entryId}/check-status")
     @FspOperation(id = "journal.entry.check_status", permission = "je.approve", component = "journal",
+        actors = {Actor.ActorType.PERSON, Actor.ActorType.DELEGATED},
         risk = FspOperation.OperationRisk.FOUR_EYES, title = "Resolve uncertain commit")
     public JournalDtos.EntryView checkStatus(jakarta.servlet.http.HttpServletRequest request, @PathVariable("tenantId") UUID tenantId,
                                              @PathVariable("entryId") UUID entryId) {
         Actor actor = actor(request);
         log.info("api_je_check_status tenantId={} entryId={} actor={}", tenantId, entryId, actor.personId());
         return journalService.checkStatus(tenantId, entryId, actor);
+    }
+
+    /** Posting intents — single-actor immediate posting (plans/inventory-plugin-plan.md D3).
+     *  Same money invariants as the four-eyes pipeline; only the maker/checker split is waived,
+     *  so the DELEGATED (on-behalf) plane is the intended consumer, e.g. the inventory plugin
+     *  posting a voucher-dispense JE. */
+    @PostMapping("/v1/tenants/{tenantId}/journal/intents")
+    @FspOperation(id = "journal.entry.post_intent", permission = "je.post.immediate", component = "journal",
+        actors = {Actor.ActorType.PERSON, Actor.ActorType.DELEGATED},
+        risk = FspOperation.OperationRisk.WRITE, title = "Post journal intent immediately")
+    public JournalDtos.EntryView postIntent(jakarta.servlet.http.HttpServletRequest request, @PathVariable("tenantId") UUID tenantId,
+                                            @RequestBody JournalDtos.CreateEntryRequest body) {
+        log.info("api_je_post_intent tenantId={}", tenantId);
+        return journalService.postIntent(tenantId, body, actor(request));
     }
 
     private static Actor actor(jakarta.servlet.http.HttpServletRequest request) {

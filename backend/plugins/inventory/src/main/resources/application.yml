@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: fsp-plugin-inventory
+  datasource:
+    url: ${FSP_PLUGIN_INVENTORY_DB_URL:jdbc:postgresql://localhost:5432/fsp_plugin_inventory}
+    username: ${FSP_PLUGIN_INVENTORY_DB_USER:fsp_plugin_inventory}
+    password: ${FSP_PLUGIN_INVENTORY_DB_PASSWORD:fsp_plugin_inventory}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8084}
+
+fsp:
+  plugin:
+    code: inventory
+    client-id: plugin-inventory
+    # PKCS#8 PEM keys (dev: generated on first boot next to the rest of the gitignored dev PKI)
+    client-key: ${FSP_PLUGIN_INVENTORY_CLIENT_KEY:../../../infrastructure/pki/dev/plugin-inventory-client.pem}
+    dpop-key: ${FSP_PLUGIN_INVENTORY_DPOP_KEY:../../../infrastructure/pki/dev/plugin-inventory-dpop.pem}
+    create-keys: ${FSP_PLUGIN_INVENTORY_CREATE_KEYS:true}
+    # voucher vault (plans/inventory-plugin-plan.md D6): KEK for AES-256-GCM voucher PINs;
+    # dev default derives the KEK from the dev value; prod supplies a short-lived secret.
+    kek: ${FSP_PLUGIN_INVENTORY_KEK:dev-inventory-kek-not-for-production}
+  idp:
+    issuer: ${FSP_IDP_ISSUER:https://idp.fsp.local}
+  core:
+    # the gateway is the plugin's ONLY way to the platform (and the actor-JWKS publisher)
+    gatewayUrl: ${FSP_GATEWAY_URL:http://localhost:8090}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  pattern:
+    console: "ts=%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX,UTC} level=%p traceId=%X{traceId} tenantId=%X{tenantId} userId=%X{userId} logger=%c{1} msg=%m ex=%replace(%ex){'\n',' | '}%n"

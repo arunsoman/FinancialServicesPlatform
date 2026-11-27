@@ -225,7 +225,7 @@ If you installed a full Ubuntu distro anyway (see §8):
 
 ```bash
 wsl -d Ubuntu
-cd /mnt/c/Users/<you>/FinancialServicesPlatform   # or your repo clone inside WSL
+cd /mnt/c/Users/<you>/FinancialServicesPlatform   # (or wherever you cloned the repo) — run from the repo root
 make tb-start && make tb-stop                     # the real ELF binary on Linux — identical to mac/linux
 ```
 
@@ -349,7 +349,10 @@ Only when you deviate from defaults:
 
 ```powershell
 $env:FSP_BOOTSTRAP_PASSWORD      = 'fsp-admin'       # core seed admin (dev only!)
-$env:FSP_INTERNAL_CREDENTIAL     = 'dev-internal-credential'
+$env:FSP_INTERNAL_CREDENTIAL     = '<generated: core inbound>'
+$env:FSP_INTERNAL_CREDENTIAL_EMI  = '<generated>'   # core/gateway/recon carry emi's secret
+$env:FSP_INTERNAL_CREDENTIAL_PSP  = '<generated>'   # gateway/recon carry psp's secret
+$env:FSP_INTERNAL_CREDENTIAL_IDP  = '<generated>'   # gateway carries idp's secret
 $env:FSP_PERSON_PASSWORD         = 'fsp-person-2026' # created-via-API persons
 $env:FSP_IDP_ISSUER              = 'https://idp.fsp.local'
 $env:FSP_TLS_PASSWORD            = 'fsp-dev'

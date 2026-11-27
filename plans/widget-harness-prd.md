@@ -1,6 +1,6 @@
 # Widget Harness & Portal Builder — PRD (Phase 1)
 
-**Status:** approved-by-recommendation (2026-11-18) · **Reference:** `/home/arun/sme` widget pipeline
+**Status:** approved-by-recommendation (2026-11-18) · **Reference:** SME widget pipeline
 (MiPay widget prompt + workbench + PortalLayoutService) · **Binding:** `AGENTS.md`, `ui-std.md`
 
 ## 1. Essence

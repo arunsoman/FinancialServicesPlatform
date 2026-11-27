@@ -9,12 +9,32 @@
  *      opens. Placing it on a portal screen stays the Builder's four-eyes publish.
  * Dev server only: in a production build the endpoints do not exist and this page says so.
  */
-import { useMemo, useState } from 'react';
-import { apiPut, readProblem } from '../portals/shared/web-core/api';
+import { useState, useEffect } from 'react';
+import { apiGet, apiPut, readProblem } from '../portals/shared/web-core/api';
+import { holdWhile } from '../portals/shared/web-core/submit-guard';
 import { WORKBENCH_PORTAL } from '../portals/portal-config';
 import { useConnection } from './connection';
-import { llmInput, parsePack } from './pack/pack';
-import type { PackIssue } from './pack/pack';
+import { BackendApi, llmInput, parseBackendProposal, parsePack, PROPOSED_CONTROLLER } from './pack/pack';
+import type { BackendProposal, PackIssue } from './pack/pack';
+
+const BACKEND_CATALOG_KEY = 'fsp.wb.backend-catalog';
+
+function apiKey(a: BackendApi) {
+  return `${a.httpMethod} ${a.path}`.toUpperCase();
+}
+
+/** What changed between the previous scan and the just-fetched catalog (additions / deletions / edits). */
+function diffApis(previous: BackendApi[], current: BackendApi[]) {
+  const prevKeys = new Set(previous.map(apiKey));
+  const currKeys = new Set(current.map(apiKey));
+  const byCurrent = new Map(current.map((a) => [apiKey(a), a]));
+  const added = current.filter((a) => !prevKeys.has(apiKey(a)));
+  const removed = previous.filter((a) => !currKeys.has(apiKey(a)));
+  const modified = previous.filter(
+    (a) => currKeys.has(apiKey(a)) && JSON.stringify(byCurrent.get(apiKey(a))?.params) !== JSON.stringify(a.params),
+  );
+  return { added, removed, modified };
+}
 
 interface Check {
   step: string;
@@ -44,7 +64,12 @@ type Phase =
 
 const ENDPOINT = '/__fsp/widget-pack';
 
-async function devCall<T>(path: string, body?: unknown): Promise<T> {
+function devCall<T>(path: string, body?: unknown): Promise<T> {
+  // dev-tool POSTs bypass api(); hold the triggering button until they settle
+  return body === undefined ? devSend<T>(path, body) : holdWhile(devSend<T>(path, body));
+}
+
+async function devSend<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${ENDPOINT}${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { 'X-FSP-Widget-Pack': '1', ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
@@ -67,13 +92,88 @@ export function NewWidgetPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const [requirement, setRequirement] = useState('');
 
-  const preview = useMemo(() => (text.trim() ? parsePack(text) : null), [text]);
+  /** Live backend API catalog (paths + signatures). Loaded from the last sync; refreshed by Sync. */
+  const [catalog, setCatalog] = useState<BackendApi[] | null>(null);
+  /** True only after a sync succeeded (or a stored catalog was loaded). Gates the prompt input. */
+  const [synced, setSynced] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [scanSummary, setScanSummary] = useState<{ added: number; removed: number; modified: number; scannedAt: string | null } | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(BACKEND_CATALOG_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed?.apis)) {
+          setCatalog(parsed.apis as BackendApi[]);
+          setSynced(true);
+          setScanSummary({ added: parsed.apis.length, removed: 0, modified: 0, scannedAt: parsed.scannedAt ?? null });
+        }
+      }
+    } catch {
+      // ignore corrupted storage
+    }
+  }, []);
+
+  const syncApis = async () => {
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      const current = await apiGet<BackendApi[]>('/api/ui/backend-apis');
+      const previous = catalog ?? [];
+      const { added, removed, modified } = diffApis(previous, current);
+      setCatalog(current);
+      setScanSummary({ added: added.length, removed: removed.length, modified: modified.length, scannedAt: new Date().toISOString() });
+      try {
+        localStorage.setItem(BACKEND_CATALOG_KEY, JSON.stringify({ apis: current, scannedAt: new Date().toISOString() }));
+      } catch {
+        // storage quota — keep the in-memory catalog anyway
+      }
+      setSynced(true);
+    } catch (e) {
+      const p = readProblem(e);
+      setSyncError(`Sync failed: ${p.detail ?? String(e)}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  /** Merge the APIs the LLM proposed into the catalog, so the prompt changes on the next round. */
+  const addProposedApisToCatalog = (proposal: BackendProposal) => {
+    const next = [...(catalog ?? [])];
+    for (const a of proposal.newApis) {
+      next.push({
+        controller: PROPOSED_CONTROLLER,
+        method: a.method ?? 'handler',
+        httpMethod: a.httpMethod,
+        path: a.path,
+        operationId: a.operationId,
+        permission: null,
+        component: null,
+        risk: null,
+        title: a.purpose,
+        params: [],
+      });
+    }
+    setCatalog(next);
+    setScanSummary((s) => s ? { ...s, added: s.added + proposal.newApis.length } : { added: proposal.newApis.length, removed: 0, modified: 0, scannedAt: null });
+    try {
+      localStorage.setItem(BACKEND_CATALOG_KEY, JSON.stringify({ apis: next, scannedAt: new Date().toISOString() }));
+    } catch {
+      // ignore
+    }
+  };
+
+  const preview = text.trim() ? parsePack(text) : null;
+  const proposalParse = text.trim() ? parseBackendProposal(text) : { ok: true };
+  const backendProposal = proposalParse.ok ? proposalParse.proposal : null;
 
   /** Copies the skill alone, or the full LLM input: skill + the requirement + the answer instruction. */
   const copyForLlm = async (withRequirement: boolean) => {
     try {
       const skill = await devCall<string>('/skill');
-      const input = withRequirement ? llmInput(skill, requirement) : skill;
+      const input = withRequirement ? llmInput(skill, requirement, catalog) : skill;
       await navigator.clipboard.writeText(input);
       setCopied(withRequirement
         ? `Copied the LLM input (${Math.round(input.length / 1000)} kB: skill + your requirement). Paste it into a new LLM chat and send it.`
@@ -136,6 +236,46 @@ export function NewWidgetPage() {
     <>
       <h1>New widget</h1>
 
+      <h2>0 · Sync backend APIs</h2>
+      <p className="dim small">
+        Scans every @RestController handler in core (@FspOperation) and diffs against the previous scan, so
+        additions and deletions of APIs show up here. The LLM prompt then carries every path the system
+        provides right now, with signatures.
+      </p>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', flexWrap: 'wrap' }}>
+        <button type="button" className="btn primary" disabled={syncing} onClick={() => void syncApis()}>
+          {syncing ? 'Scanning controllers…' : 'Sync backend APIs'}
+        </button>
+        {scanSummary && (
+          <>
+            <span className={`badge ${scanSummary.added || scanSummary.removed || scanSummary.modified ? 'ok' : 'dim'}`}>
+              +{scanSummary.added} added
+            </span>
+            <span className={`badge ${scanSummary.removed ? 'bad' : 'dim'}`}>
+              –{scanSummary.removed} removed
+            </span>
+            <span className={`badge ${scanSummary.modified ? 'bad' : 'dim'}`}>
+              {scanSummary.modified} changed
+            </span>
+            <span className="dim small">
+              {scanSummary.scannedAt ? `last scanned ${new Date(scanSummary.scannedAt).toLocaleTimeString()}` : '—'}
+            </span>
+          </>
+        )}
+      </div>
+      {syncError && <p className="bad small">{syncError}</p>}
+      {!synced ? (
+        <p className="warn small">
+          Not synced yet — the prompt below stays locked until a sync succeeds, so the LLM always starts
+          from the real, current API surface.
+        </p>
+      ) : (
+        <p className="small ok">
+          Synced — <b>{catalog?.length ?? 0}</b> backend endpoints in the prompt{' '}
+          <button type="button" className="lnk" onClick={() => void syncApis()}>re-sync</button>
+        </p>
+      )}
+
       <h2>1 · Describe the widget</h2>
       <p className="dim small">
         What should it show, who uses it, what can they do? Name the data if you know it (e.g. &ldquo;pending approvals for my
@@ -146,15 +286,16 @@ export function NewWidgetPage() {
         className="pack"
         style={{ minHeight: '7rem', fontFamily: 'inherit', fontSize: 13 }}
         value={requirement}
+        disabled={!synced}
         onChange={(e) => setRequirement(e.target.value)}
-        placeholder="e.g. A card listing my organization's users who are disabled, with a button to re-activate each one."
+        placeholder={!synced ? 'Sync backend APIs first (above), then describe the widget…' : "e.g. A card listing my organization's users who are disabled, with a button to re-activate each one."}
       />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', flexWrap: 'wrap' }}>
-        <button type="button" className="btn primary" disabled={requirement.trim().length < 10} onClick={() => void copyForLlm(true)}>
+        <button type="button" className="btn primary" disabled={!synced || requirement.trim().length < 10} onClick={() => void copyForLlm(true)}>
           Copy LLM input
         </button>
         <span className="dim small">
-          skill + your requirement, ready to paste into any LLM chat ·{' '}
+          {!synced ? 'sync backend APIs first to activate this prompt' : 'skill + current backend APIs + your requirement, ready to paste into any LLM chat'}·{' '}
           <button type="button" className="lnk" onClick={() => void copyForLlm(false)}>copy the skill only</button>
         </span>
       </div>
@@ -190,6 +331,39 @@ export function NewWidgetPage() {
           <span className="ok">Pack looks complete:</span> <b>{preview.pack.label}</b> · <span className="mono">{preview.pack.id}</span> →{' '}
           <span className="mono">shared/widgets/{preview.pack.area}/{preview.pack.name}/</span> ({preview.pack.files.map((f) => f.name).join(', ')})
         </p>
+      )}
+
+      {backendProposal && (
+        <>
+          <h2>Backend changes the LLM asked for</h2>
+          <p className="dim small">
+            The LLM found no existing API for the job. It defined new APIs the system needs, plus where the
+            server-side code should be modified. Add them to the catalog so the prompt (and the next LLM round)
+            knows about them.
+          </p>
+          {backendProposal.newApis.length > 0 && (
+            <>
+              <p className="small">New APIs:</p>
+              <ul className="small mono" style={{ paddingLeft: '1.2em', margin: '4px 0' }}>
+                {backendProposal.newApis.map((a, i) => (
+                  <li key={i}>{a.httpMethod} {a.path}{a.purpose ? ` — ${a.purpose}` : ''}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {backendProposal.serverSide.length > 0 && (
+            <>
+              <p className="small">Server side:</p>
+              <ul className="small mono" style={{ paddingLeft: '1.2em', margin: '4px 0' }}>
+                {backendProposal.serverSide.map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            </>
+          )}
+          {backendProposal.note && <p className="small bad">{backendProposal.note}</p>}
+          <button type="button" className="btn primary" onClick={() => void addProposedApisToCatalog(backendProposal)}>
+            Note proposed APIs in the prompt as NOT built (re-copy the LLM input)
+          </button>
+        </>
       )}
 
       <h2>3 · Check &amp; register</h2>

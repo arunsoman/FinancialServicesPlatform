@@ -1,6 +1,6 @@
 # FSP Multi-Portal UI — Understanding & Build Plan (pre-build, from SME study)
 
-Status: **UNDERSTANDING — not yet built**. Ported from a full study of `/home/arun/sme/frontend`
+Status: **UNDERSTANDING — not yet built**. Ported from a full study of the SME frontend
 on 2026-07-22. Nothing here starts until the open questions below are answered.
 
 ---

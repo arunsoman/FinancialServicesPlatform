@@ -25,6 +25,7 @@ public class LedgerController {
 
     @GetMapping("/v1/tenants/{tenantId}/books")
     @FspOperation(id = "ledger.book.list", permission = "gl.account.view", component = "ledger",
+        actors = {Actor.ActorType.PERSON, Actor.ActorType.DELEGATED, Actor.ActorType.MACHINE},
         risk = FspOperation.OperationRisk.READ, title = "List books")
     public List<Book> books(jakarta.servlet.http.HttpServletRequest request, @PathVariable("tenantId") UUID tenantId) {
         return ledgerService.books(tenantId, actor(request));
@@ -39,8 +40,23 @@ public class LedgerController {
         return ledgerService.provisionDefault(tenantId, bookId, actor(request));
     }
 
+    /** Additive, idempotent CoA rows for plugins (plans/inventory-plugin-plan.md D4):
+     *  inserts only codes missing from the book; existing accounts at a code are used as-is.
+     *  MACHINE is the intended actor (plugin readiness); PERSON stays available for ops. */
+    @PostMapping("/v1/tenants/{tenantId}/books/{bookId}/gl-accounts/ensure")
+    @FspOperation(id = "ledger.coa.ensure", permission = "gl.account.create", component = "ledger",
+        actors = {Actor.ActorType.MACHINE, Actor.ActorType.PERSON},
+        risk = FspOperation.OperationRisk.WRITE, title = "Ensure additively-provisioned GL accounts")
+    public List<GlAccount> ensureCoa(@org.springframework.web.bind.annotation.RequestBody java.util.List<CoaTemplates.Row> rows,
+                                     jakarta.servlet.http.HttpServletRequest request,
+                                     @PathVariable("tenantId") UUID tenantId, @PathVariable("bookId") UUID bookId) {
+        log.info("api_coa_ensure tenantId={} bookId={} rows={}", tenantId, bookId, rows.size());
+        return ledgerService.ensureAdditive(tenantId, bookId, actor(request), rows);
+    }
+
     @GetMapping("/v1/tenants/{tenantId}/books/{bookId}/gl-accounts")
     @FspOperation(id = "ledger.gl_account.list", permission = "gl.account.view", component = "ledger",
+        actors = {Actor.ActorType.PERSON, Actor.ActorType.DELEGATED, Actor.ActorType.MACHINE},
         risk = FspOperation.OperationRisk.READ, title = "List GL accounts")
     public List<GlAccount> glAccounts(jakarta.servlet.http.HttpServletRequest request,
                                       @PathVariable("tenantId") UUID tenantId, @PathVariable("bookId") UUID bookId) {

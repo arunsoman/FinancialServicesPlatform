@@ -44,7 +44,11 @@ export function WidgetHost(props: WidgetHostProps): ReactNode {
   const held = props.cells ?? session.permissions;
   const gated = !props.ungated && (mode === 'live' || props.cells !== undefined);
   const portal = props.portal ?? session.user?.tenantType ?? 'ANY';
-  const orgId = props.orgId !== undefined ? props.orgId : session.user?.tenantId ?? null;
+  // When acting ("sudo into a tenant", plans/act-as-tenant-plan.md) the person's widgets
+  // operate on the TARGET tenant — stepping in means the queue/orgs/users all read that
+  // tenant, not the home one. An explicit props.orgId always wins.
+  const actingTenantId = session.actAs?.targetTenantId ?? null;
+  const orgId = props.orgId !== undefined ? props.orgId : (actingTenantId ?? session.user?.tenantId ?? null);
 
   const ctx = useMemo(
     () => ({

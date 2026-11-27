@@ -1,6 +1,7 @@
 package com.fsp.idp;
 
 import com.fsp.shared.JwtService;
+import com.fsp.shared.PkiKeyResolver;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -21,13 +22,8 @@ public class IdpJwtBeanConfig {
         return jwt;
     }
 
-    /** Signing key lookup: configured path → repo-root fallback (launcher cwd-independent). */
+    /** Signing key lookup via the shared relative-only PkiKeyResolver (launcher-cwd-independent). */
     private static java.nio.file.Path resolveSigningKey(String configured) {
-        java.util.List<java.nio.file.Path> candidates = java.util.List.of(
-            java.nio.file.Path.of(configured),
-            java.nio.file.Path.of("infrastructure/pki/dev/idp-signing.pem"),
-            java.nio.file.Path.of("/home/arun/FinancialServicesPlatform/infrastructure/pki/dev/idp-signing.pem"));
-        return candidates.stream().filter(java.nio.file.Files::exists).findFirst()
-            .orElse(java.nio.file.Path.of(configured));
+        return PkiKeyResolver.resolve(configured, "idp-signing.pem");
     }
 }

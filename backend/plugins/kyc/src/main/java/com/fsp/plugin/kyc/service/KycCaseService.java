@@ -38,6 +38,7 @@ public class KycCaseService {
 
     private final KycCaseRepository caseRepository;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private final CoreClient core;
     private final KycCheckRepository checkRepository;
     private final KycUboRepository uboRepository;
     private final KycBankAccountRepository bankRepository;
@@ -48,8 +49,9 @@ public class KycCaseService {
                           KycUboRepository uboRepository, KycBankAccountRepository bankRepository,
                           KycCaseEventRepository eventRepository,
                           IdempotencyRecordRepository idempotencyRepository,
-                          org.springframework.jdbc.core.JdbcTemplate jdbc) {
+                          org.springframework.jdbc.core.JdbcTemplate jdbc, CoreClient core) {
         this.jdbc = jdbc;
+        this.core = core;
         this.caseRepository = caseRepository;
         this.checkRepository = checkRepository;
         this.uboRepository = uboRepository;
@@ -67,6 +69,7 @@ public class KycCaseService {
         KycCase.STATUS_DRAFT, KycCase.STATUS_TENANT_PENDING, KycCase.STATUS_SUBMITTED,
         KycCase.STATUS_PENDING_REVIEW, KycCase.STATUS_REQUEST_INFO, KycCase.STATUS_APPROVED,
         KycCase.STATUS_REJECTED, KycCase.STATUS_STALLED);
+    private static final java.util.Set<String> KINDS = java.util.Set.of(KycCase.KIND_ORGANIZATION, KycCase.KIND_CUSTOMER);
     private static final java.util.Set<String> RISKS = java.util.Set.of("LOW", "MEDIUM", "HIGH");
 
     /**
@@ -76,7 +79,7 @@ public class KycCaseService {
      */
     @Transactional(readOnly = true)
     public KycDtos.CaseListResponse list(UUID ownerTenantId, int page, int size,
-                                         String q, String status, String risk, String sort) {
+                                         String q, String status, String risk, String kind, String sort) {
         if (size < 1 || size > 100) throw new ApiProblemException("PAGE_SIZE_INVALID", "size must be 1-100", 400);
         if (page < 0) throw new ApiProblemException("PAGE_INVALID", "page must be ≥ 0", 400);
         String[] sp = (sort == null || sort.isBlank() ? "submittedAt,desc" : sort).split(",");
@@ -94,9 +97,11 @@ public class KycCaseService {
             }
             String like = term.toLowerCase().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
             sql.append(" AND (search_vector @@ plainto_tsquery('english', ?) OR lower(legal_name) LIKE ? ")
-               .append("OR lower(registration_number) LIKE ? OR lower(coalesce(tax_id,'')) LIKE ? OR lower(case_no) LIKE ?)");
+               .append("OR lower(registration_number) LIKE ? OR lower(coalesce(tax_id,'')) LIKE ? OR lower(case_no) LIKE ? OR lower(coalesce(email,'')) LIKE ? OR coalesce(phone,'') LIKE ?)");
             args.add(term);
             args.add("%" + like);
+            args.add(like);
+            args.add(like);
             args.add(like);
             args.add(like);
             args.add(like);
@@ -105,6 +110,11 @@ public class KycCaseService {
         if (!st.isEmpty()) {
             sql.append(" AND status IN (").append("?,".repeat(st.size()).replaceAll(",$", "")).append(")");
             args.addAll(st);
+        }
+        List<String> kd = csv(kind, KINDS, "kind");
+        if (!kd.isEmpty()) {
+            sql.append(" AND case_kind IN (").append("?,".repeat(kd.size()).replaceAll(",$", "")).append(")");
+            args.addAll(kd);
         }
         List<String> rk = csv(risk, RISKS, "risk");
         if (!rk.isEmpty()) {
@@ -146,7 +156,12 @@ public class KycCaseService {
     }
 
     @Transactional(readOnly = true)
-    public KycDtos.CaseView get(UUID caseId, UUID ownerTenantId, UUID viewerPersonId) {
+    public java.util.Optional<KycCase> find(UUID caseId, UUID ownerTenantId) {
+        return caseRepository.findByIdAndOwnerTenantId(caseId, ownerTenantId);
+    }
+
+    @Transactional(readOnly = true)
+    public KycDtos.CaseView get(UUID caseId, UUID ownerTenantId, UUID viewerPersonId, String viewerAssertion) {
         KycCase c = caseRepository.findByIdAndOwnerTenantId(caseId, ownerTenantId)
             .orElseThrow(() -> new ApiProblemException("KYC_CASE_NOT_FOUND",
                 "Case not found or not accessible", 404));
@@ -170,6 +185,8 @@ public class KycCaseService {
             blockedReason = "STATE";
         } else if (viewerPersonId != null && viewerPersonId.equals(c.makerPersonId)) {
             blockedReason = "MAKER";
+        } else if (viewerPersonId != null && !isChecker(viewerAssertion)) {
+            blockedReason = "CHECKER";
         }
         boolean canDecide = blockedReason == null;
 
@@ -182,7 +199,8 @@ public class KycCaseService {
             c.operationalCity, c.operationalRegion, c.operationalPostal,
             c.riskRating, c.nextReviewDate, c.approvalId, c.approvalRev,
             c.makerPersonId, c.makerName, c.checkerPersonId, c.submittedAt, c.createdAt, c.updatedAt, c.version,
-            isStalled(c), true, canDecide, blockedReason, checks, ubos, banks
+            isStalled(c), true, canDecide, blockedReason, checks, ubos, banks,
+            c.caseKind, customerView(c)
         );
     }
 
@@ -326,6 +344,12 @@ public class KycCaseService {
     // ---------- private helpers ----------
 
     private void validateCreate(KycDtos.CreateCaseRequest req) {
+        // screening is the provider's verdict (ScreeningService), never the applicant's/maker's claim
+        if (req.screeningOutcome() != null) {
+            log.warn("kyc_screening_outcome_asserted_by_client refused");
+            throw new ApiProblemException("SCREENING_NOT_CLIENT_SETTABLE",
+                "screeningOutcome is decided by the screening provider and cannot be supplied", 400);
+        }
         NamibiaRules.requireNonBlank(req.legalName(), "KYC_LEGAL_NAME", "legalName is required");
         NamibiaRules.requireNonBlank(req.registrationNumber(), "KYC_REGISTRATION", "registrationNumber is required");
         NamibiaRules.requireBipaRegistration(req.registrationNumber());
@@ -469,8 +493,25 @@ public class KycCaseService {
         return new KycDtos.CaseSummary(
             c.id, c.caseNo, c.subjectTenantId, c.legalName, c.dbaName,
             c.subType, c.registrationNumber, c.status, c.riskRating,
-            c.submittedAt, c.nextReviewDate, c.makerName, c.updatedAt, c.version, isStalled(c)
+            c.submittedAt, c.nextReviewDate, c.makerName, c.updatedAt, c.version, isStalled(c),
+            c.caseKind, c.primaryContact,
+            KycCase.KIND_CUSTOMER.equals(c.caseKind) ? c.contactVerifiedAt != null : null
         );
+    }
+
+    static KycDtos.CustomerView customerView(KycCase c) {
+        if (!KycCase.KIND_CUSTOMER.equals(c.caseKind)) return null;
+        return new KycDtos.CustomerView(c.subjectPersonId, c.firstName, c.lastName, c.gender, c.dateOfBirth,
+            maskEmail(c.email), mask(c.phone), c.primaryContact, c.contactVerifiedAt != null,
+            c.contactVerifiedAt, c.activationSentAt);
+    }
+
+    /** j•••@example.com — enough for staff to recognise, not to harvest. */
+    static String maskEmail(String e) {
+        if (e == null) return null;
+        int at = e.indexOf('@');
+        if (at <= 1) return e;
+        return e.charAt(0) + "•••" + e.substring(at);
     }
 
     /** PII is masked to the last 4 on every read (no PII-read permission exists in core yet). */
@@ -484,5 +525,21 @@ public class KycCaseService {
         return KycCase.STATUS_STALLED.equals(c.status)
             || ((KycCase.STATUS_TENANT_PENDING.equals(c.status) || KycCase.STATUS_SUBMITTED.equals(c.status))
                 && c.updatedAt.isBefore(Instant.now().minusSeconds(600)));
+    }
+
+    /**
+     * Whether the acting person is a designated checker. Core owns the flag (persons.is_checker) —
+     * the plugin never reads core tables (AGENTS §4), so it asks core as that person
+     * (GET /v1/me/permissions → "checker"). Core re-checks the flag when the decision resolves the
+     * approval, so an unreachable core here only hides the decision controls; it never grants them.
+     */
+    public boolean isChecker(String actorAssertion) {
+        if (actorAssertion == null || actorAssertion.isBlank()) return false;
+        try {
+            return Boolean.TRUE.equals(core.me(actorAssertion).get("checker"));
+        } catch (RuntimeException e) {
+            log.warn("kyc_checker_lookup_failed error={}", e.getClass().getSimpleName());
+            return false;
+        }
     }
 }

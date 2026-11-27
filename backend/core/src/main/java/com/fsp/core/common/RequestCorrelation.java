@@ -10,6 +10,7 @@ public final class RequestCorrelation {
     private static final ThreadLocal<String> CLIENT_ID = new ThreadLocal<>();
     private static final ThreadLocal<Actor> ACTOR = new ThreadLocal<>();
     private static final ThreadLocal<UUID> HOME_TENANT_ID = new ThreadLocal<>();
+    private static final ThreadLocal<String> ACT_SESSION_ID = new ThreadLocal<>();
 
     private RequestCorrelation() {}
 
@@ -34,11 +35,17 @@ public final class RequestCorrelation {
 
     public static void setHomeTenantId(UUID homeTenantId) { HOME_TENANT_ID.set(homeTenantId); }
 
+    /** The verified live act-as session this request runs under (ActAsFilter), else null. */
+    public static String actSessionId() { return ACT_SESSION_ID.get(); }
+
+    public static void setActSessionId(String sessionId) { ACT_SESSION_ID.set(sessionId); }
+
     public static void clear() {
         CORRELATION.remove();
         CLIENT_IP.remove();
         CLIENT_ID.remove();
         ACTOR.remove();
         HOME_TENANT_ID.remove();
+        ACT_SESSION_ID.remove();
     }
 }

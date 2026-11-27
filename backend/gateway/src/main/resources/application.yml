@@ -7,9 +7,16 @@ fsp:
   gateway:
     core-base-url: ${FSP_CORE_URL:http://localhost:8081}
     idp-base-url: ${FSP_IDP_URL:http://localhost:8082}
+    emi-base-url: ${FSP_EMI_URL:http://localhost:8086}
+    psp-base-url: ${FSP_PSP_URL:http://localhost:8085}
     issuer: ${FSP_IDP_ISSUER:https://idp.fsp.local}
     audience: fsp-financial-api
-    internal-credential: ${FSP_INTERNAL_CREDENTIAL:dev-internal-credential}
+    # gateway only opens core's plane — this is CORE's secret (per-target, red-team P0 fix)
+    internal-credential: ${FSP_INTERNAL_CREDENTIAL_CORE:}
+    # per-target outbound hops (red-team P0 fix): each upstream has its own secret
+    emi-internal-credential: ${FSP_INTERNAL_CREDENTIAL_EMI:}
+    psp-internal-credential: ${FSP_INTERNAL_CREDENTIAL_PSP:}
+    idp-internal-credential: ${FSP_INTERNAL_CREDENTIAL_IDP:}
     catalog-refresh-seconds: 60
     max-body-bytes: ${FSP_PROXY_MAX_BODY:1048576}
 logging:

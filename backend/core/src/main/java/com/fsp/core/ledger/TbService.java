@@ -83,8 +83,21 @@ public class TbService {
             List<String> failures = new ArrayList<>();
             while (results.next()) {
                 CreateAccountStatus status = results.getStatus();
-                long idLow = batch.getId(UInt128.LeastSignificant);
-                failures.add("index=%d idLow=%d status=%s".formatted(results.getPosition(), idLow, status));
+                // The results array carries a row for every position in this client; 'Created' is the
+                // success status — only real rejections fail the batch. 'exists' (identical id
+                // re-dispatched, e.g. a CoA provision/ensure retry after an UnknownTransport — the
+                // deterministic UUIDs are stable) is an idempotent success. Flag/user-data/ledger
+                // drift still rejects below via the exists_with_different_* statuses.
+                if (status == CreateAccountStatus.Created || status == CreateAccountStatus.Exists) {
+                    if (status == CreateAccountStatus.Exists) {
+                        log.debug("tb_create_accounts_exists index={}", results.getPosition());
+                    }
+                    continue;
+                }
+                batch.beforeFirst();
+                batch.setPosition(results.getPosition());
+                failures.add("index=%d idLow=%d status=%s".formatted(results.getPosition(),
+                    batch.isValidPosition() ? batch.getId(UInt128.LeastSignificant) : -1L, status));
             }
             if (!failures.isEmpty()) {
                 log.warn("tb_create_accounts_rejected count={} failures={}", specs.size(), failures);
@@ -121,7 +134,13 @@ public class TbService {
             List<String> failures = new ArrayList<>();
             while (results.next()) {
                 CreateTransferStatus status = results.getStatus();
-                failures.add("row=%d status=%s".formatted(results.getPosition(), status));
+                // 'Created' is success; LinkedEventChainOpen is success-by-design for the
+                // intermediate legs of a linked chain (the final leg resolves the chain).
+                if (status == CreateTransferStatus.Created || status == CreateTransferStatus.LinkedEventChainOpen) continue;
+                batch.beforeFirst();
+                batch.setPosition(results.getPosition());
+                failures.add("index=%d idLow=%d status=%s".formatted(results.getPosition(),
+                    batch.isValidPosition() ? batch.getId(UInt128.LeastSignificant) : -1L, status));
             }
             if (!failures.isEmpty()) {
                 log.warn("tb_create_transfers_rejected count={} failures={}", specs.size(), failures);

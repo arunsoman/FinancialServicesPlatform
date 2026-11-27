@@ -17,6 +17,27 @@ timeline
     V14 : act as sessions
     V15 : plugin types columns
     V16 : person checker flag
+    V19 : roles governance
+    V20 : psp plugin consent
+    V21 : bank accounts
+    V23 : notifications and push
+    V24 : person password must change
+    V25 : persons list index
+    V26 : inventory permissions
+    V28 : approvals pending target unique
+    V29 : notification channels
+    V30 : auth plane dispatch
+    V31 : push subscription version
+    V32 : sku orders
+    V33 : recon permission
+    V34 : role menu grants org units
+    V36 : customer activation
+    V37 : auth channel width
+    V38 : notification snooze resolve
+    V39 : branch maintenance
+    V40 : invoice permissions
+    V41 : invoices
+    V42 : drop signed portal delivery
 
-**Next free migration number: V17.**
+**Next free migration number: V43.**
 ```

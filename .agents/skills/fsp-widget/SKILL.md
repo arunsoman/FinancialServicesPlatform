@@ -1,294 +1,99 @@
 ---
 name: fsp-widget
-description: Builds FSP React UI widgets for the widget harness - manifest, component, contracts, fixtures, tests. Self-updates by scanning backend controllers for @FspOperation endpoints so it never has to ask the user for server details that already exist in code.
+description: Builds an FSP portal widget end to end. In an agent harness (repo + shell) it runs two gated stages — stage 1 designs, builds, verifies, e2e-tests and registers the React UI on fixtures until the user approves it; stage 2 then builds/reuses the backend (FAPI 2.0, four-eyes, minor-unit money, audit, tests) and proves it live with Playwright. In the widget workbench (chat LLM, prompt carries "MODE: WORKBENCH-PACK") it answers with a paste-able widget pack instead. Use for any new or changed portal screen, panel, list, card, form, queue or widget.
 ---
 
-# fsp-widget skill — FSP React widget builder (self-updating)
+# fsp-widget — one requirement → one shipped widget
 
-**How to use:** describe the widget you need (what it shows, what it mutates, who uses it). The skill walks you through an operations sheet, then emits the complete widget files in the FSP output format. Save the answer as `frontend/src/portals/shared/widgets/<area>/<name>/index.tsx` and run `bun run tools/widgets.ts check`.
+## 0. Which mode am I in? (decide before anything else)
 
----
-
-## Self-update principle (read this first)
-
-The skill is a static `SKILL.md` — it cannot execute code itself. Instead, **you (the AI) run a controller-scan procedure before every widget** so the skill stays up-to-date with the codebase:
-
-1. **Scan every `*Controller.java`** under `backend/core/src/main/java/com/fsp/core/`.
-2. **Extract** for each handler method: HTTP method + full path (class `@RequestMapping` + method `@GetMapping`/`@PostMapping`/`@PutMapping`/`@PatchMapping`/`@DeleteMapping`), `@FspOperation{id, permission, component, risk, resource, resourceVariable, title}`, `@PathVariable` names/types, `@RequestParam` names, request body type, response type.
-3. **Build a mental API catalogue** keyed by logical operation. This catalogue is your source of truth — do **not** ask the user for endpoint details that exist in code.
-4. **Reuse first.** If an operation matches an existing endpoint (same path/method/permission), mark it EXISTING and use the exact cell + shapes.
-5. **New only when nothing matches.** If no controller method serves the needed operation after a full scan, it is genuinely new → propose an endpoint + permission cell + backend stub with `@FspOperation`, add it to `sources.ts`, and mark it NEW.
-
-**Rule:** If you cannot find an endpoint in the scanned controllers, it does not exist in the codebase. Do not guess a URL — propose it as NEW with a stub.
-
----
-
-## What this skill produces
-
-One FSP widget: a React component registered through `defineWidget`, plus its data sources/commands mapped in `sources.ts`, permission cells from the FSP catalogue (`ui.widget.register`, `ui.layout.manage`, `je.approve`, `kyc.approve`, `user.manage`, etc.), React size spans for xs/sm/md/lg, fixtures for default/empty/error/forbidden, and Vitest tests.
-
-**Stack:** React 18 + TypeScript strict + Vite/Bun. **Never Angular.** The widget reaches the API ONLY through the widget data port (`port.request` / `port.command`) — never `fetch`, `HttpClient`, `localStorage`, etc.
-
-**Backend contract (widget harness PRD §4):**
-
-| Op | Endpoint | Permission cell |
+| Signal | Mode | What you produce |
 |---|---|---|
-| register/upsert widget | `PUT /v1/ui/widgets` | `ui.widget.register` |
-| list widget registry | `GET /v1/ui/widgets` | `ui.widget.register` |
-| save draft layout | `PUT /v1/ui/layouts/{portal}/draft` | `ui.layout.manage` |
-| submit to publish | `POST /v1/ui/layouts/{portal}/submit` | `ui.layout.manage` (maker) |
-| approve/reject via queue | `/v1/approvals` (OpType `UI_LAYOUT_PUBLISH`) | `ui.layout.manage` (checker ≠ maker) |
-| read published layout | `GET /v1/ui/layouts/{portal}/published` | authenticated-only |
+| The prompt contains `MODE: WORKBENCH-PACK`, **or** you cannot read/write files or run commands | **WORKBENCH-PACK** | Follow `docs/skills/fsp-widget-author/SKILL.md` exactly (it is in the prompt already). One `=== FSP-WIDGET-PACK v1 ===` block or a `NEEDS BACKEND` note. Nothing below applies. |
+| You have the repository and a shell (Claude Code, pi, …) | **AGENT** (default) | Files in the repo, verified by tools, in two gated stages — the rest of this file. |
 
-Existing FSP widgets also use: `kyc.orgs.tree`, `users.list`, `approvals.get`, `journal.get`, etc. — reuse first, never invent an endpoint.
+The user can force a pack in agent mode ("give me a pack") — then answer like WORKBENCH-PACK.
 
----
+## 1. Non-negotiables (agent mode)
 
-## Step 0 — Scan controllers (run before drafting the sheet)
+- **Read first, once:** `AGENTS.md` §1–§2 (FAPI 2.0 + domain invariants). Load the **fapi2-compliance** skill (`.agents/skills/fapi2-compliance/SKILL.md`) before stage 2 or before touching anything a browser calls.
+- **Tools before reading.** Never open whole controllers, DTO files, test logs or the generated skill's endpoint table to "look around". Ask the tools (§3) — they answer in a screen. Open a file only to edit it, or at the exact `file:line` a tool printed.
+- **Reuse before create:** an existing endpoint (`widgets:survey`), an existing widget (extend it), an SME widget (`/home/arun/sme/frontend/projects/shared/widgets/…` — port its UX), a kit component (`widgets/kit/`).
+- **The stage file is the state:** `frontend/src/portals/shared/widgets/<area>/<name>/.widget-stage.json`. Read it with `bun run widgets:stage <id>` at the start of every session — it tells you the stage, the operations sheet and which gate items are still open. Never edit it by hand except the `screen` block (§5).
+- **Gates are hard.** Never run `widgets:accept` unless the user explicitly approved the UI in this conversation, quoting who approved. Never start stage-2 work before `accept` succeeded.
+- **Shared tree:** other sessions and a live Vite run in this checkout — no `git stash`, no `tsc -b` (`bun run typecheck` only), no destructive git. Commit only when asked.
 
-For each file matching `backend/core/src/main/java/com/fsp/core/**/*Controller.java`:
-
-**A. Read the class-level mapping** (optional but common):
-```java
-@RestController
-@RequestMapping("/v1/tenants/{tenantId}/journal-entries")
-public class JournalController { ... }
-```
-
-**B. For each method, read the method-level mapping + annotation.** Example from `JournalController`:
-
-```java
-@PostMapping("/v1/tenants/{tenantId}/journal-entries")
-@FspOperation(id = "journal.entry.create", permission = "je.create", component = "journal",
-    risk = FspOperation.OperationRisk.WRITE, title = "Create journal entry draft")
-public JournalDtos.EntryView create(HttpServletRequest request,
-    @PathVariable("tenantId") UUID tenantId,
-    @RequestBody JournalDtos.CreateEntryRequest body)
-```
-
-Extract into a record like:
-
-| Field | From this example |
-|---|---|
-| method | POST |
-| path | `/v1/tenants/{tenantId}/journal-entries` |
-| opId | `journal.entry.create` |
-| permission (cell) | `je.create` |
-| component | `journal` |
-| risk | `WRITE` |
-| title | `Create journal entry draft` |
-| pathVars | `{tenantId: UUID}` |
-| body | `JournalDtos.CreateEntryRequest` |
-| response | `JournalDtos.EntryView` |
-
-**C. Note class-level `@RequestMapping` prefix** — prepend it to method paths when present (e.g. `UiHarnessController` uses `@RequestMapping("/v1/ui")`).
-
-**D. Also scan `sources.ts`** (`frontend/src/portals/shared/widgets/core/sources.ts`, `SOURCES` and `COMMANDS` maps) to see which endpoints already have logical names widgets can reuse.
-
----
-
-## Step 1 - the operations sheet
-
-List every operation the UI performs (each read and each write: load, save draft, submit, approve, …). For each:
-
-- **endpoint** (METHOD /v1/path — BFF-relative; `/v1/...` rides BffProxyController → gateway → core)
-- **permission cell** (FSP flat key, e.g. `ui.widget.register`, `je.approve`, `kyc.approve`)
-- **shape it RECEIVES** (response)
-- **shape it SENDS** (request body / params)
-- **what the UI does after success, a refusal (422 / 409) and 403**
-- **KIND** — exactly one of:
-  - `View` (every read)
-  - `Create` (makes a new record, including submitting a new one)
-  - `Modify` (changes an existing record: edit, save draft, submit)
-  - `Approve` (every other action: execute, schedule, approve, reject, withdraw, cancel, …)
-
-Rules:
-- **Reuse first.** Look for each operation in the scanned controller catalogue and `sources.ts`. Mark it EXISTING and use that logical name, its cell and its exact shapes.
-- **New when nothing fits.** Mark it NEW and propose: a logical source/command name, an endpoint (`/v1/<area>/…`), a permission cell — reuse an existing row and verb when the meaning matches, else a new row `<area>.<resource>` with one of the ten verbs — and the request/response shapes this UI needs. Also deliver a backend controller stub.
-- **If an endpoint, permission, or shape you need is missing after a full controller scan, it is genuinely new.** Do NOT ask the user for what you could not find in code — propose it as NEW with a stub.
-- Complex UIs (draft → submit, approve/reject…) are several operations: each has its own command, request contract and response contract; chained writes run in order and a later failure says the earlier step succeeded.
-
-### Verbs (the only ten) and tenant sources
-
-| verb | meaning |
-|---|---|
-| read | view / list |
-| create | create / add |
-| modify | change / update |
-| delete | delete / retire |
-| submit | submit (maker) |
-| authorize | approve (checker) — never in the same role as submit on the same row |
-| execute | run / act with effect |
-| export | download / export |
-| administer | administer / control |
-| simulate | simulate (sandbox only) |
-
-Tenant source:
-- **PATH** — named by a path variable: `tenant = "{tenantId}"`
-- **SELF** — the caller's own org: `tenant = "null"`
-- **LOOKUP** — derived from an object: `lookup = "<resolver>"`
-- **NONE** — platform-wide: `tenant = "null"`
-
----
-
-## Step 2 - the files
-
-When the sheet is complete, print it briefly, then output the files in the Output format, then the self-check list. Nothing else.
-
-### Hard rules (the checker enforces every one)
-
-1. **One file:** `frontend/src/portals/shared/widgets/<area>/<name>/index.tsx` — `<area>`/`<name>` are lower case (name may contain dashes); the widget id is `<area>.<name>`.
-2. **Reuse, never import from MiPay.** Only the FSP widget runtime elements (import them relative from the widget folder — a widget at `widgets/<area>/<name>/` is two levels under `widgets/`):
-   - `defineWidget`, `WidgetDef`, `WidgetAction`, `OPERATIONS` from `../../core/manifest`
-   - `span`, `tierOf`, `COLS`, `TIERS` from `../../core/grid`
-   - `useWidgetRuntime`, `usePortData`, `WidgetContextProvider` from `../../core/context`
-   - `WidgetDataPortLike` from `../../core/manifest`
-   - Design-system atoms from `../../../ui/atoms` (Chip, EmptyState, Panel, PageHeader, StatusBadge, etc.) — design tokens only per ui-std §2
-3. **Never define a component, directive or pipe other than the widget itself.** Never use raw `<table>`, `<button>`, `<input>`, `<select>`, `<textarea>`. Use the design-system atoms.
-4. **One network path:** never `fetch`, `XMLHttpRequest`, `HttpClient`, `localStorage`, `sessionStorage`, `indexedDB`. Only `port.request(name, params)` and `port.command(name, body, params)`.
-5. **Every source and command has a response contract; every command that sends a body (POST/PUT/PATCH) has a request contract.** TypeScript interfaces/types for contracts — export them.
-6. **Every gated action:** `data-action="<action id>"` on the element AND the widget manifest `actions[]` declares the cell (`ui.widget.register`, etc.). Permission gating is enforced by `WidgetHost` (the `requires` list).
-7. **Mobile first:** `size` for xs, sm, md, lg with `span.*` (xs max 4 columns, sm 8, md/lg 12). Style with `@container`, never `@media`. For structural phone changes (fewer table columns) use `tier === 'xs'`.
-8. **Fixtures:** scenarios `default`, `empty`, `error`, plus `forbidden` (fail 403) when the widget hides on 403, and one per refusal you handle. Every value must match the response contract exactly (types, nulls, every field present). Realistic Namibian data (organisations, people, NAD amounts, ISO dates).
-9. **Tests (Vitest globals `describe`/`it`/`expect`):** at least 4 — the right sources and params, the data rendered, actions hidden without their cell and shown after grant, each write's params/body, no `[data-diagnostics]` with fixtures, and a drifted answer diagnosed in `[data-diagnostics]`.
-10. **TypeScript strict, no `any` leaks in templates, signals for state, React `memo`/`useCallback` equivalents.** No `TODO` left anywhere.
-11. **Permissions are flat keys** (not `row:verb`). A widget's `requires` is `string[]` (OR) or `{ all: [...] }` (AND). `commandOperations` maps each command to one of `view | create | modify | approve`.
-12. **Keep sources.ts in sync.** When you mark an operation NEW with a new endpoint, add its logical name to `SOURCES` (reads) or `COMMANDS` (writes) in `sources.ts` so the widget's `port.request`/`port.command` can resolve it.
-
----
-
-## Output format (machine-applied — exactly this, paths from the repository root)
+## 2. The two stages
 
 ```
-=== FILE: frontend/src/portals/shared/widgets/<area>/<name>/index.tsx ===
-…the whole file…
-=== END FILE ===
-=== FILE: frontend/src/portals/shared/widgets/core/sources.ts === (only if adding new SOURCES/COMMANDS entries)
-…the diff or full file…
-=== END FILE ===
-=== DATA-SOURCES ===
-  '<area.thing.verb>': { '*': { method: 'GET', path: '/v1/…', query: ['…'] } },
-=== END DATA-SOURCES ===
-(only when an operation is NEW:)
-=== BACKEND: backend/core/src/main/java/com/fsp/core/<area>/<Thing>Controller.java ===
-…the whole stub controller…
-=== END BACKEND ===
-=== BACKEND-NOTES ===
-…what each stub endpoint must do…
-=== END BACKEND-NOTES ===
+ requirement
+     │
+ ┌───▼──────────── STAGE 1 · UI/UX (context: ui-std, design system, fixtures) ─────────────┐
+ │ survey → plan (REUSE/NEW) → build widget on fixtures → verify → e2e workbench lane      │
+ │ → wire screen/menu → REGISTER in core's widget registry → present for review ⟲ feedback │
+ └───┬──────────────────────────────────────────────────────────────────────────────────────┘
+     │  user says "approved"  →  bun run widgets:accept <id> --by "<who>"   (locks UI + contract)
+ ┌───▼──────────── STAGE 2 · BACKEND (context: backend/AGENTS.md, FAPI 2.0, invariants) ────┐
+ │ implement every NEW op to the locked contract → backend tests → widgets:skill            │
+ │ → plan flips NEW→REUSE → verify → e2e --lane all --live → widgets:done                  │
+ └──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Backend stub template (for NEW operations only)
+**Context discipline.** Stage 1 loads UI material only: `references/stage1-ui.md`, the widget contract (§3–§7 of `docs/skills/fsp-widget-author/SKILL.md`), `frontend/AGENTS.md`, and the `ui-std.md` sections you need. Backend knowledge in stage 1 comes **only** from `widgets:survey` / `widgets:dto` output — no Java beyond that. Stage 2 loads `references/stage2-backend.md`, `backend/AGENTS.md` and the FAPI skill, and treats the accepted UI as fixed: if the backend cannot honour the locked contract, stop and ask (a contract change goes back through approval).
 
-```java
-package com.fsp.core.<area>;
+Full procedures: **`references/stage1-ui.md`**, **`references/stage2-backend.md`**, **`references/e2e.md`**.
 
-import com.fsp.core.common.Actor;
-import com.fsp.core.common.ApiException;
-import com.fsp.core.common.FspOperation;
-import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.web.bind.annotation.*;
+## 3. Tool belt (run from `frontend/`; each prints a compact answer, full logs under `node_modules/.cache/fsp-widget-agent/<id>/`)
 
-import java.util.List;
-import java.util.UUID;
+| Command | Use it to | Stage |
+|---|---|---|
+| `bun run widgets:survey <terms…>` | find backend operations (code-derived: method, `/api` path, op id, permission, risk, query params, body + return types, handler `file`), logical names already mapped, permission keys, existing widgets and SME widgets matching the terms | 1, 2 |
+| `bun run widgets:dto <Outer.Name…> --ts [--depth 2]` | print a backend DTO as a TS interface for `data.ts` / `model.ts` contracts | 1, 2 |
+| `bun run widgets:plan <id> --requirement "…"` | derive the operations sheet (REUSE / NEW) from the manifest + `data.ts`; creates/updates the stage file | 1, 2 |
+| `bun run widgets:verify <id>` | code rules (no fetch/storage/any/hex/@media/raw URLs, `retry: 0` on mutations, tests exist) · `widgets:check` · `tsc` · eslint · vitest · catalog freshness | 1, 2 |
+| `bun run widgets:e2e <id> --scaffold` / `widgets:e2e <id> [--lane workbench\|portal\|all] [--live]` | write / run the Playwright spec (§ `references/e2e.md`) | 1, 2 |
+| `bun run widgets:register-bff <id>` | register the widget with core's widget registry through a real BFF session (no tokens, FAPI 2.0) | end of 1 |
+| `bun run widgets:stage <id>` | stage, operations, approval, and the open gate items with the command that fixes each | any |
+| `bun run widgets:accept <id> --by "<who>" [--note "…"]` | record the user's UI approval → stage 2 (refuses unless verify + registration + workbench e2e are green on the current files) | gate |
+| `bun run widgets:done <id>` | finish: no NEW ops left, UI/contract unchanged since approval, live e2e green, skill fresh | end of 2 |
+| `bun run widgets:skill` | regenerate the chat-mode skill + `endpoints.json` from code (run after adding endpoints) | 2 |
 
-/** STUB generated for widget <area.name>: implement the service calls. */
-@RestController
-@RequestMapping("/v1/<area>/<resource>")
-public class <Thing>Controller {
+Backend tests: `cd backend && ./gradlew :core:test --tests '<FQCN>'` (scope it — the full suite is slow).
 
-    @FspOperation(id = "<area>.<resource>.<verb>", component = "<area>",
-        permission = "<area>.<resource>.read", risk = FspOperation.OperationRisk.READ,
-        resource = "<resource>", resourceVariable = "id", title = "<Title>")
-    @GetMapping("/{id}")
-    public <ResponseRow> get(HttpServletRequest request, @PathVariable("id") UUID id) {
-        Actor actor = actor(request);
-        throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED, "<area>.<resource>: not implemented yet");
-    }
+## 4. Stage 1 in one screen (details: `references/stage1-ui.md`)
 
-    private static Actor actor(HttpServletRequest request) {
-        Actor actor = (Actor) request.getAttribute("fsp.actor");
-        if (actor == null) throw ApiException.unauthorized("ACTOR_MISSING", "No authenticated actor");
-        return actor;
-    }
-}
+1. `widgets:stage <id>` (resume?) → otherwise `widgets:survey <domain terms>` and, for each candidate response, `widgets:dto … --ts`.
+2. Decide the screen: new menu point vs. attach to an existing screen (`docs/widget-workbench.md` §9, `frontend/AGENTS.md` §3.3). Look for an SME counterpart and existing widget to extend.
+3. Draft the operations sheet in chat (each read/write: endpoint, permission, KIND view/create/modify/approve, request/response shape, behaviour on success / 403 / 409 / 422). REUSE what exists; NEW only when nothing fits — define its exact request/response shapes now (they become the stage-2 spec).
+4. Build `widgets/<area>/<name>/`: `index.tsx`, `widget.tsx`, `data.ts` (sources/commands + fixtures for **every** op incl. NEW ones), `model.ts` (types + pure logic), `<name>.test.ts`. `bun run widgets:plan <id> --requirement "…"`.
+5. `widgets:verify <id>` until green.
+6. `widgets:e2e <id> --scaffold`, write the real journeys, `widgets:e2e <id> --lane workbench` until green.
+7. Wire the screen (menu.ts / screens.tsx or an existing screen), set the stage file's `screen` block; if the stack is up, also run `--lane portal` (NEW ops are stubbed from fixtures).
+8. **Register:** `widgets:register-bff <id>` — mandatory before review; the widget now appears in the workbench registry (sort "Newest created first" to find it).
+9. Present for review (§6) and iterate. Every change re-runs verify + e2e (gates track file hashes).
+
+## 5. Stage 2 in one screen (details: `references/stage2-backend.md`)
+
+1. `widgets:stage <id>` → the NEW ops list is your backlog; the accepted contract in `data.ts`/`model.ts` is the spec.
+2. Load the fapi2-compliance skill + `backend/AGENTS.md`. For each NEW op: `@FspOperation` handler (correct permission + risk), service, migration (permission key + role grants), four-eyes for approve-kind writes, idempotency, outbox + audit, tenant-subtree check, REST collection standard, concurrency rules. Tests that fail before / pass after.
+3. `widgets:skill` → `widgets:plan <id>` (NEW flips to REUSE) → `widgets:verify <id>`.
+4. Stack up (rebuild core) → `widgets:register-bff <id>` if the version changed → `widgets:e2e <id> --lane all --live`.
+5. `widgets:done <id>`. Report (§7).
+
+## 6. Presenting stage 1 for approval (exact shape)
+
+```
+Widget <id> — ready for your review (stage 1 · UI on fixtures)
+Preview:   http://localhost:5173/widget-workbench/w/<id>          (every tier; ?scenario=empty|error; ?cells=none)
+Screen:    <portal route>                                          (or: attaches to <screen>)
+Registry:  registered <id>@<version> as <user>                     (/widget-workbench/registry?sort=created-desc)
+Operations: <REUSE n> · <NEW n> — NEW ones (built in stage 2 to exactly these shapes):
+  POST /v1/… <permission> — request {…} → response {…}
+Checks:    verify ✓ · e2e workbench ✓ (<n> tests) · portal lane <✓ | not run: stack down>
+Decisions I made: <one line each>
+Reply "approved" (or with changes). Approval locks the UI and these shapes; the backend is built next.
 ```
 
-**Stub rules:** `@NotBlank`/`@NotNull` on required request fields (the contract generator reads them); primitives (`int`, `long`, `boolean`) for never-null numbers and flags, boxed or `String`/`Instant` otherwise; the widget's contracts must describe exactly these records; `501 NOT_IMPLEMENTED` until implemented. Add a BACKEND-NOTES block saying what each stub endpoint must do.
+## 7. Final report (end of stage 2)
 
----
-
-## Self-check (print it, ticked, after the files)
-
-- [ ] I ran Step 0 (scanned all `*Controller.java` + `sources.ts`) before drafting the sheet
-- [ ] every operation is marked EXISTING (found in scanned controllers / sources.ts) or NEW (proposed + stub + sources.ts entry)
-- [ ] every EXISTING operation uses the exact cell, path, method, and shapes from the scanned controller
-- [ ] if an operation was NOT found after a full scan, I marked it NEW — I did not ask the user for something that should come from code
-- [ ] every operation in the sheet has a source/command, a response contract, a request contract (writes) and a fixture answer
-- [ ] only FSP design-system atoms; no raw HTML controls; no own sub-components
-- [ ] every action: `data-action="<id>"` + manifest `actions[].cell`
-- [ ] fixtures match the contracts field by field
-- [ ] `size` for all four tiers; no `@media`
-- [ ] tests as in rule 9
-- [ ] widget id is `<area>.<name>`, lower case
-- [ ] `requires` uses FSP flat permission keys
-- [ ] NEW endpoints added to `SOURCES`/`COMMANDS` in `sources.ts`
-
----
-
-## Example: a minimal read-only widget
-
-A widget that lists journal entries (EXISTING source `journal.get`, permission `je.view` — found by scanning `JournalController`):
-
-```tsx
-import { defineWidget } from '../../core/manifest';
-import { span } from '../../core/grid';
-import { useWidgetRuntime, usePortData } from '../../core/context';
-import { Panel, EmptyState } from '../../../ui/atoms';
-
-export default defineWidget({
-  id: 'journal.entries',
-  version: '1.0.0',
-  label: 'Journal entries',
-  category: 'Ledger',
-  contexts: ['PLATFORM', 'MANUFACTURER', 'DISTRIBUTOR', 'ANY'],
-  requires: ['je.view'],
-  sources: ['journal.get'],
-  actions: [],
-  size: { xs: span.xs(4), sm: span.sm(8), md: span.md(6), lg: span.lg(4) },
-  render: JournalEntries,
-});
-
-function JournalEntries(props: { mode: 'live' | 'fixture'; state: string }) {
-  const { port } = useWidgetRuntime();
-  const rows = usePortData<any[]>(() => port.request('journal.get', { size: '10' }), []);
-
-  if (rows.state === 'loading') return <Panel className="p-4"><EmptyState title="Loading…" /></Panel>;
-  if (rows.state === 'forbidden') return <Panel className="p-4"><EmptyState title="Not allowed" hint="You lack je.view" /></Panel>;
-  if (rows.state === 'empty') return <Panel className="p-4"><EmptyState title="No journal entries" /></Panel>;
-  if (rows.state === 'error') return <Panel className="p-4"><EmptyState title="Error" hint={rows.problem?.detail} /></Panel>;
-
-  return (
-    <Panel className="p-4">
-      <ul className="flex flex-col divide-y divide-line">
-        {rows.data.map(r => <li key={r.id} className="py-2">{r.reference}</li>)}
-      </ul>
-    </Panel>
-  );
-}
-```
-
-`sources.ts` already contains:
-```ts
-'journal.get': { '*': { method: 'GET', path: '/v1/tenants/{tenantId}/journal-entries?size=10' } },
-```
-
----
-
-## When to ask the user
-
-Stop and ask (once, with your drafted operations sheet) only when:
-- You need a **genuinely new business domain** that has no controller at all (e.g. a brand-new area not in any scanned controller) — then propose the endpoint + permission cell + stub.
-- The widget needs a config schema beyond the four canonical operations.
-
-Do **not** ask the user for endpoint URLs, permission cells, or response shapes that you can read from a scanned controller.
+What shipped (widget path, screen, endpoints with permission + risk), migrations, tests added (frontend unit, backend, e2e) with their last results, FAPI checklist items touched, anything left open. Commands to re-run: `widgets:verify <id>`, `widgets:e2e <id> --lane all --live`.

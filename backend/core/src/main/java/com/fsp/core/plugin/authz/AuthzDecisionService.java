@@ -1,5 +1,8 @@
 package com.fsp.core.plugin.authz;
 
+import com.fsp.core.actas.ActAsService;
+import com.fsp.core.common.RequestCorrelation;
+
 import com.fsp.core.rbac.PermissionService;
 import com.fsp.core.common.Actor;
 import com.fsp.core.common.ApiException;
@@ -22,15 +25,37 @@ public class AuthzDecisionService {
 
     private final PermissionService permissions;
     private final TenantRepository tenants;
+    private final ActAsService actAs;
 
-    public AuthzDecisionService(PermissionService permissions, TenantRepository tenants) {
+    public AuthzDecisionService(PermissionService permissions, TenantRepository tenants, ActAsService actAs) {
         this.permissions = permissions;
         this.tenants = tenants;
+        this.actAs = actAs;
     }
 
     public Decision decide(UUID personId, String username, UUID activeTenantId,
                            String permission, UUID targetTenantId, String operationId) {
+        return decide(personId, username, activeTenantId, permission, targetTenantId, operationId, null);
+    }
+
+    /**
+     * With an act-as session the person is decided AS the acted-as tenant: the session must be
+     * live and theirs, the target must be inside the acted-as subtree, and the person's
+     * permissions are capped by its ceiling (PermissionService, ACTING).
+     */
+    public Decision decide(UUID personId, String username, UUID activeTenantId,
+                           String permission, UUID targetTenantId, String operationId, String actSessionId) {
         Actor actor = new Actor(personId, username, activeTenantId);
+        if (actSessionId != null && !actSessionId.isBlank()) {
+            ActAsService.Live live = actAs.live(actSessionId, personId);
+            if (live == null) {
+                log.warn("authz_act_as_expired personId={} session={} op={}", personId, actSessionId, operationId);
+                return new Decision(false, "ACT_AS_EXPIRED", permission);
+            }
+            RequestCorrelation.setHomeTenantId(live.homeTenantId());
+            RequestCorrelation.setActSessionId(live.id());
+            actor = new Actor(personId, username, live.targetTenantId(), Actor.ActorType.ACTING, null);
+        }
         Tenant target = tenants.findById(targetTenantId)
             .orElseThrow(() -> ApiException.notFound("TENANT_NOT_FOUND",
                 "Target tenant %s not found".formatted(targetTenantId)));

@@ -28,16 +28,24 @@ public class ApprovalController {
         this.permissions = permissions;
     }
 
-    /** GET /v1/approvals?tenantId=...&status=PENDING_CHECKER&page? — bounded list (guide §4A). */
+    /** GET /v1/approvals?tenantId=...&status=PENDING_CHECKER&operationType=UI_LAYOUT_PUBLISH&size? — bounded (guide §4A). */
     @FspOperation(id = "approval.queue.read", component = "approval", title = "View approval queue")
     @GetMapping("/v1/approvals")
     public List<ApprovalDtos.QueueView> queue(jakarta.servlet.http.HttpServletRequest request,
                                               @RequestParam("tenantId") UUID tenantId,
                                               @RequestParam(value = "status", required = false) String status,
+                                              @RequestParam(value = "operationType", required = false) String operationType,
                                               @RequestParam(value = "size", required = false, defaultValue = "50") Integer size) {
         if (size < 1 || size > 100) throw ApiException.badRequest("BOUNDS", "size must be 1-100");
-        return approvalService.queue(tenantId, status == null ? List.of() : List.of(status), actor(request))
+        return approvalService.queue(tenantId, status == null ? List.of() : List.of(status), operationType, actor(request))
             .stream().limit(size).toList();
+    }
+
+    /** GET /v1/approvals/{id} — one request, with this caller's canDecide/blockedReason. */
+    @FspOperation(id = "approval.read", component = "approval", title = "View one approval request")
+    @GetMapping("/v1/approvals/{id}")
+    public ApprovalDtos.QueueView one(jakarta.servlet.http.HttpServletRequest request, @PathVariable UUID id) {
+        return approvalService.viewById(id, actor(request));
     }
 
     /** POST /v1/approvals — open a GENERIC evidence request (domain flows open their own typed rows). */
@@ -51,8 +59,7 @@ public class ApprovalController {
         if (body.targetResourceId() == null) throw ApiException.badRequest("APPROVAL_FIELDS", "targetResourceId required");
         var row = approvalService.open(actor.activeTenantId(), body.operationType(), body.targetResourceId(),
             actor, "generic-" + body.targetResourceId(), null);
-        return new ApprovalDtos.QueueView(row.id, row.tenantId, row.operationType, row.targetResourceId,
-            row.status, row.makerId, row.checkerId, row.reason, row.requestedAt, row.decidedAt);
+        return approvalService.view(row, actor);
     }
 
     @FspOperation(id = "approval.resolve.approve", component = "approval",

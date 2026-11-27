@@ -1,12 +1,11 @@
 /**
- * The VERIFIED portal layout (plans/signed-portal-delivery-plan.md, builder phase B).
+ * A portal's published menus, as the portal renders them (builder phase B).
  *
- * SignedMenuGate verifies the bundle's ES256 signature against the build-pinned trust
- * store, then parses its payload HERE (zod at the boundary, ui-std §7) — only a payload
- * that verified AND has this exact shape ever reaches the renderer. Nothing in this module
- * fetches: the layout is never read from an unverified source, never cached across users.
+ * SignedMenuGate loads them from core (GET /api/ui/menus/{portal}) and parses the payload HERE
+ * (zod at the boundary, ui-std §7) — only a payload with this exact shape reaches the renderer.
+ * (The "Signed" names are historical: menus are no longer signed; core checks every API call.)
  *
- * Payload (core UiBundleService.canonicalPayload):
+ * Payload (core PortalMenuService.menu):
  *   { portal, schemaVersion, layoutVersion, publishedAt,
  *     menus:[{ id, label, icon?, screens:[{ id, label, placedWidgets:[{ id, widgetId, span, config? }] }] }],
  *     widgets:[{ id, version, bundle, bundleHash, requires[] }] }   ← the server-approved set
@@ -51,11 +50,41 @@ export type SignedMenu = SignedLayout['menus'][number];
 export type SignedScreen = SignedMenu['screens'][number];
 export type SignedPlaced = SignedScreen['placedWidgets'][number];
 
-/** Verified layout for this portal; null = no published layout (coded menus apply). */
+/** This portal's published layout; null = none (the gate shows "No menu configured"). */
 export const SignedLayoutCtx = createContext<SignedLayout | null>(null);
 
 export function useSignedLayout(): SignedLayout | null {
   return useContext(SignedLayoutCtx);
+}
+
+/* ─────────────────────────── menu access (the Permissions Matrix cells) ───────────────────────────
+ * What the signed-in person holds on THIS portal's published menu (core GET /api/me/menu-access):
+ * `full` = every cell (platform roles, an org's anchor admin/checker roles); otherwise exactly the
+ * cells their roles were granted, wire form "<menuId>/<screenId>:<ACTION>". A submenu shows only
+ * with its ACTIVE cell. This steers navigation only — core still checks every API call.
+ */
+export type MenuAction = 'CREATE' | 'VIEW' | 'UPDATE' | 'DELETE' | 'AUTHORIZE' | 'ACTIVE';
+
+export interface MenuAccess {
+  full: boolean;
+  cells: ReadonlySet<string>;
+}
+
+/** Default outside a loaded menu: nothing on a published menu is reachable. */
+export const NO_MENU_ACCESS: MenuAccess = { full: false, cells: new Set() };
+
+export function menuCell(menuId: string, screenId: string, action: MenuAction): string {
+  return `${menuId}/${screenId}:${action}`;
+}
+
+export function holdsCell(access: MenuAccess, menuId: string, screenId: string, action: MenuAction): boolean {
+  return access.full || access.cells.has(menuCell(menuId, screenId, action));
+}
+
+export const MenuAccessCtx = createContext<MenuAccess>(NO_MENU_ACCESS);
+
+export function useMenuAccess(): MenuAccess {
+  return useContext(MenuAccessCtx);
 }
 
 export function screenLink(menu: SignedMenu, screen: SignedScreen): string {
@@ -82,12 +111,19 @@ export function placedDef(
   return def;
 }
 
+/**
+ * A submenu shows when the person holds its ACTIVE cell (or the whole menu) AND at least one of
+ * its placed widgets renders for them (approved, this build has it, its requires are met).
+ */
 export function screenVisible(
   layout: SignedLayout,
+  menu: SignedMenu,
   screen: SignedScreen,
   permissions: readonly string[],
   registry: (id: string) => WidgetDef | undefined,
+  access: MenuAccess,
 ): boolean {
+  if (!holdsCell(access, menu.id, screen.id, 'ACTIVE')) return false;
   return screen.placedWidgets.some((p) => {
     const def = placedDef(layout, p, registry);
     return !!def && requiresMet(def, permissions);
@@ -102,14 +138,44 @@ export function signedSpan(def: WidgetDef, placed: SignedPlaced, tier: Tier): nu
   return Math.max(z0.min, Math.min(z0.max, s));
 }
 
+/**
+ * Where this person can open a widget in THIS portal: the first screen that places it and whose
+ * ACTIVE cell they hold. Null when the portal's published menus don't offer it to them — callers
+ * then show no link rather than a path that lands somewhere else.
+ */
+export function widgetScreenLink(layout: SignedLayout, widgetId: string, access: MenuAccess): string | null {
+  if (!layout.widgets.some((w) => w.id === widgetId)) return null;
+  for (const m of layout.menus) {
+    for (const s of m.screens) {
+      if (s.placedWidgets.some((p) => p.widgetId === widgetId) && holdsCell(access, m.id, s.id, 'ACTIVE')) return screenLink(m, s);
+    }
+  }
+  return null;
+}
+
+/**
+ * Hook form of {@link widgetScreenLink} for widgets that link to another widget's screen:
+ * `link('kyc.manage', '?case=…')` → the portal-relative path, or null when this portal's
+ * menus don't offer that widget to this person (show no link / say so — never guess a path).
+ */
+export function useWidgetLink(): (widgetId: string, search?: string) => string | null {
+  const layout = useSignedLayout();
+  const access = useMenuAccess();
+  return (widgetId, search = '') => {
+    const screen = layout ? widgetScreenLink(layout, widgetId, access) : null;
+    return screen ? `${screen}${search}` : null;
+  };
+}
+
 /** First screen the user can see (the portal's home when a layout is published). */
 export function firstVisibleLink(
   layout: SignedLayout,
   permissions: readonly string[],
   registry: (id: string) => WidgetDef | undefined,
+  access: MenuAccess,
 ): string | null {
   for (const m of layout.menus) {
-    for (const s of m.screens) if (screenVisible(layout, s, permissions, registry)) return screenLink(m, s);
+    for (const s of m.screens) if (screenVisible(layout, m, s, permissions, registry, access)) return screenLink(m, s);
   }
   return null;
 }
@@ -119,10 +185,11 @@ export function layoutNavEntries(
   layout: SignedLayout,
   permissions: readonly string[],
   registry: (id: string) => WidgetDef | undefined,
+  access: MenuAccess,
 ): MenuNavEntry[] {
   const out: MenuNavEntry[] = [];
   for (const m of layout.menus) {
-    const visible = m.screens.filter((s) => screenVisible(layout, s, permissions, registry));
+    const visible = m.screens.filter((s) => screenVisible(layout, m, s, permissions, registry, access));
     if (!visible.length) continue; // a menu with nothing the user may see never shows
     out.push({ kind: 'group', label: m.label });
     for (const s of visible) out.push({ kind: 'item', label: s.label, icon: m.icon ?? '▸', link: screenLink(m, s) });

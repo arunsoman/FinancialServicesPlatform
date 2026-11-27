@@ -25,6 +25,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin, ViteDevServer } from 'vite';
 import { checkDataModule, parsePack } from '../../src/widget-workbench/pack/pack';
 import type { Endpoint, PackIssue, WidgetPack } from '../../src/widget-workbench/pack/pack';
+import { endpointsOf, scanCatalog } from './catalog';
 
 interface Check {
   step: string;
@@ -140,7 +141,8 @@ export function widgetPackPlugin(): Plugin {
       if (file.startsWith(dir)) for (const m of mods) server.moduleGraph.invalidateModule(m);
     }
     try {
-      const endpoints = (JSON.parse(readFileSync(join(root, 'src', 'widget-workbench', 'pack', 'endpoints.json'), 'utf8')) as { endpoints: Endpoint[] }).endpoints;
+      // the code-derived scan (same one widgets:skill and the agent tools use) — never a stale copy
+      const endpoints: Endpoint[] = endpointsOf(scanCatalog(join(root, '..')));
       const data = (await server.ssrLoadModule(`/${rel}/data.ts`)) as Parameters<typeof checkDataModule>[1];
       issues.push(...checkDataModule(pack.id, data, endpoints));
       const idx = (await server.ssrLoadModule(`/${rel}/index.tsx`)) as { default?: { id?: string; sources?: string[]; commands?: string[] } };

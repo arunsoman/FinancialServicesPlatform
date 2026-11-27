@@ -1,6 +1,7 @@
 package com.fsp.plugin.kyc.api;
 
 import com.fsp.plugin.kyc.service.KycOrganizationService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -34,8 +35,8 @@ public class KycOrganizationController {
 
     /** kyc.org.get — GET /organizations/{tenantId} */
     @GetMapping("/organizations/{tenantId}")
-    public Object get(
-            @PathVariable("tenantId") UUID tenantId) {
-        return Map.of("tenantId", tenantId, "kycStatus", "UNKNOWN");
+    public KycDtos.OrganizationRow get(HttpServletRequest request, @PathVariable("tenantId") UUID tenantId) {
+        var actor = com.fsp.plugin.kyc.security.ActorAssertionFilter.actor(request);
+        return orgService.get(tenantId, actor.assertion());
     }
 }

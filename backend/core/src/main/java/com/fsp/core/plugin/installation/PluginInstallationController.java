@@ -109,7 +109,7 @@ public class PluginInstallationController {
             @RequestParam("tenantId") UUID tenantId,
             HttpServletRequest request) {
         Actor actor = actor(request);
-        if (actor.type() == Actor.ActorType.PERSON) {
+        if (actor.isHumanPlane()) {
             permissions.require(actor, "plugin.manage", actor.activeTenantId());
         }
         return service.effective(pluginCode, tenantId);

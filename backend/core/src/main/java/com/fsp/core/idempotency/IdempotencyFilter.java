@@ -184,6 +184,8 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             case PERSON -> null;
             case MACHINE -> "client:" + actor.clientId();
             case DELEGATED -> "delegated:" + actor.clientId() + ":" + actor.personId();
+            // acting keys never collide with the same person's own (non-acting) keys
+            case ACTING -> "acting:" + actor.personId() + ":" + actor.activeTenantId();
         };
         if (name == null) return actor.personId();
         return UUID.nameUUIDFromBytes(name.getBytes(java.nio.charset.StandardCharsets.UTF_8));

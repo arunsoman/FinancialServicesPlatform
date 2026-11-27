@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Slf4j
+@RestController
 public class TenantController {
 
     private final TenantService tenantService;
@@ -33,7 +34,10 @@ public class TenantController {
         return created;
     }
 
-    @FspOperation(id = "tenant.detail.read", component = "tenant", title = "View tenant detail")
+    // DELEGATED: a plugin acting for a person (KYC "My organization") reads through the SAME
+    // scoped visibility check (TenantService.detail) as the person would — no wider reach.
+    @FspOperation(id = "tenant.detail.read", component = "tenant", title = "View tenant detail",
+        actors = {Actor.ActorType.PERSON, Actor.ActorType.DELEGATED})
     @GetMapping("/v1/tenants/{tenantId}")
     public TenantDtos.TenantView detail(jakarta.servlet.http.HttpServletRequest request, @PathVariable("tenantId") UUID tenantId) {
         return tenantService.detail(tenantId, actor(request));
@@ -43,6 +47,17 @@ public class TenantController {
     @GetMapping("/v1/tenants/{tenantId}/children")
     public List<TenantDtos.TenantView> children(jakarta.servlet.http.HttpServletRequest request, @PathVariable("tenantId") UUID tenantId) {
         return tenantService.children(tenantId, actor(request));
+    }
+
+    @FspOperation(id = "tenant.children.page", component = "tenant", title = "Page tenant children")
+    @GetMapping("/v1/tenants/{tenantId}/children/page")
+    public TenantDtos.ChildPage childrenPage(jakarta.servlet.http.HttpServletRequest request,
+                                             @PathVariable("tenantId") UUID tenantId,
+                                             @org.springframework.web.bind.annotation.RequestParam(required = false) Integer page,
+                                             @org.springframework.web.bind.annotation.RequestParam(required = false) Integer size,
+                                             @org.springframework.web.bind.annotation.RequestParam(required = false) String q,
+                                             @org.springframework.web.bind.annotation.RequestParam(required = false) String sort) {
+        return tenantService.childrenPage(tenantId, actor(request), page, size, q, sort);
     }
 
     private static Actor actor(jakarta.servlet.http.HttpServletRequest request) {

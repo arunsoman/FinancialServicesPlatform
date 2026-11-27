@@ -13,7 +13,50 @@
 
 @layer base {
   :root {
-    /* ---- FSP semantic roles (ui-std §2.3) driven FROM the TPTS palette ---- */
+    /* ---- FSP semantic roles (ui-std §2.3) — LIGHT (default theme) ---- */
+    --color-canvas: #ffffff;              /* page background            */
+    --color-surface: #f4f6f8;             /* panel body                 */
+    --color-surface-raised: #e9edf1;      /* raised panel               */
+    --color-surface-sunken: #ffffff;      /* inputs / sunken chrome     */
+    --color-line: #d9d9d9;                /* default border             */
+    --color-line-strong: #b9b9b9;
+    --color-accent: #f0a10e;              /* TPTS gold (the brand)      */
+    --color-accent-deep: #f7bc55;         /* soft gold variant          */
+    --color-accent-ink: #0a0a0a;          /* ink ON the gold            */
+    --color-action-primary: #f0a10e;
+    --color-action-primary-ink: #0a0a0a;
+    --color-action-secondary: #171717;
+    --color-action-text: #ffffff;         /* text on action buttons     */
+    --color-action-destructive: #b33a2e;
+    --color-action-subtle: #f0f0f0;
+    --color-status-info: #0b7a9e;
+    --color-status-success: #1e7a3d;
+    --color-status-success-bg: #e8f4ec;
+    --color-status-warning: #8a5100;
+    --color-status-danger: #b33a2e;
+    --color-status-neutral: #6b6b6b;
+    --color-text: #171717;
+    --color-text-dim: #5f5f5f;
+    --color-text-invert: #ffffff;
+    --color-financial-debit: #0b7a9e;
+    --color-financial-credit: #1e7a3d;
+    --color-financial-pending: #8a5100;
+    --color-financial-committed: #0b7a9e;
+    --color-financial-unknown: #b33a2e;
+    --color-chip-bg: #f0f0f0;
+    --color-chip-text: #5f5f5f;
+    --color-scrollbar-thumb: #c9c9c9;
+    --color-placeholder: #6b6b6b;
+    --color-grid-line: rgba(0, 0, 0, 0.03);
+    /* per-portal identity (shell sets it from portal.config.accent) */
+    --portal-accent: var(--color-accent);
+    /* radius scale (SME: pill controls, 16px panels) */
+    --radius-panel: 16px;
+    --radius-field: 10px;
+  }
+
+  [data-theme="dark"] {
+    /* ---- DARK theme (TPTS near-black ladder + gold accent) ---- */
     --color-canvas: #070707;              /* near-black page            */
     --color-surface: #111111;             /* panel body                 */
     --color-surface-raised: #1a1a1a;      /* raised panel (site --k3)   */
@@ -26,6 +69,7 @@
     --color-action-primary: #f0a10e;
     --color-action-primary-ink: #080808;
     --color-action-secondary: #151515;
+    --color-action-text: #f4f4f4;         /* text on action buttons     */
     --color-action-destructive: #ff6b5e;
     --color-action-subtle: #1d1d1d;
     --color-status-info: #7cecff;         /* site cyan                  */
@@ -42,6 +86,11 @@
     --color-financial-pending: #f7c66b;
     --color-financial-committed: #7cecff;
     --color-financial-unknown: #ff6b5e;
+    --color-chip-bg: #1d1d1d;
+    --color-chip-text: #c9c9c9;
+    --color-scrollbar-thumb: #2a2a2a;
+    --color-placeholder: #6b6b6b;
+    --color-grid-line: rgba(255, 255, 255, 0.01);
     /* per-portal identity (shell sets it from portal.config.accent) */
     --portal-accent: var(--color-accent);
     /* radius scale (SME: pill controls, 16px panels) */
@@ -63,8 +112,8 @@
     /* the hero: faint grid + gold glow, fixed behind the console */
     background:
       radial-gradient(1100px 520px at 78% -12%, color-mix(in srgb, var(--portal-accent) 11%, transparent), transparent 62%),
-      linear-gradient(rgba(255, 255, 255, .022) 1px, transparent 1px) 0 0 / 48px 48px,
-      linear-gradient(90deg, rgba(255, 255, 255, .022) 1px, transparent 1px) 0 0 / 48px 48px,
+      linear-gradient(var(--color-grid-line) 1px, transparent 1px) 0 0 / 48px 48px,
+      linear-gradient(90deg, var(--color-grid-line) 1px, transparent 1px) 0 0 / 48px 48px,
       var(--color-canvas);
     background-attachment: fixed;
     color: var(--color-text);
@@ -73,14 +122,14 @@
 
   ::selection { background: color-mix(in srgb, var(--portal-accent) 45%, transparent); color: #fff; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
-  ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 999px; border: 2px solid var(--color-canvas); }
+  ::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: 999px; border: 2px solid var(--color-canvas); }
   ::-webkit-scrollbar-track { background: transparent; }
 }
 
 @layer components {
   /* panel: the every-screen card (SME .panel) */
   .fsp-panel {
-    background: linear-gradient(180deg, #141414, var(--color-surface) 120px);
+    background: linear-gradient(180deg, var(--color-surface-raised), var(--color-surface) 120px);
     border: 1px solid var(--color-line);
     border-radius: var(--radius-panel);
   }
@@ -88,7 +137,7 @@
   .fsp-btn {
     @apply inline-flex items-center justify-center gap-1.5 whitespace-nowrap;
     font: inherit; font-weight: 600;
-    color: var(--color-text);
+    color: var(--color-action-text);
     background: var(--color-action-secondary);
     border: 1px solid var(--color-line-strong);
     border-radius: 999px;
@@ -99,6 +148,9 @@
   .fsp-btn:hover:not(:disabled) { border-color: #5a5a5a; background: #1d1d1d; }
   .fsp-btn:active:not(:disabled) { transform: translateY(1px); }
   .fsp-btn:disabled { opacity: .42; cursor: not-allowed; }
+  /* submit-guard: the control's action is still in flight */
+  [data-fsp-busy] { cursor: progress; }
+  .fsp-btn[data-fsp-busy] { opacity: .7; }
   .fsp-btn:focus-visible { outline: 2px solid var(--portal-accent); outline-offset: 2px; }
   .fsp-btn-primary {
     background: var(--portal-accent); border-color: var(--portal-accent); color: var(--color-action-primary-ink);
@@ -111,10 +163,15 @@
     color: var(--color-action-destructive); font-weight: 800; font-size: 12px; letter-spacing: .05em; text-transform: uppercase;
   }
   .fsp-btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-action-destructive) 12%, transparent); }
-  .fsp-btn-ghost { background: transparent; border-color: var(--color-line); }
+  /* ghost sits on the page surface, so it takes the page's text colour (not the dark-pill ink) */
+  .fsp-btn-ghost { background: transparent; border-color: var(--color-line); color: var(--color-text); }
+  .fsp-btn-ghost:hover:not(:disabled) { background: var(--color-action-subtle); border-color: var(--color-line-strong); }
+  /* permission-matrix checkbox: token-coloured, a touch larger than the UA default */
+  .fsp-matrix-box { width: 1rem; height: 1rem; accent-color: var(--color-action-secondary); cursor: pointer; }
+  .fsp-matrix-box:disabled { cursor: not-allowed; opacity: .55; }
   /* chip: tinted pill, tiny, heavy, uppercase (SME .chip) */
   .fsp-chip {
-    display: inline-block; border: 1px solid transparent; background: #1d1d1d; color: #c9c9c9;
+    display: inline-block; border: 1px solid transparent; background: var(--color-chip-bg); color: var(--color-chip-text);
     border-radius: 999px; padding: 2px 9px; font-size: 10.5px; font-weight: 800;
     letter-spacing: .05em; text-transform: uppercase; white-space: nowrap;
   }
@@ -134,7 +191,7 @@
   }
   .fsp-field:hover { border-color: var(--color-line-strong); }
   .fsp-field:focus { outline: none; border-color: var(--portal-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--portal-accent) 22%, transparent); }
-  ::placeholder { color: #6b6b6b; }
+  ::placeholder { color: var(--color-placeholder); }
   .fsp-eyebrow {
     font-size: 10.5px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase;
     color: color-mix(in srgb, var(--portal-accent) 80%, #fff 0%);

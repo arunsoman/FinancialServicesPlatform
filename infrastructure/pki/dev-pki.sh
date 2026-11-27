@@ -9,7 +9,6 @@
 #   bff-workload.p12 / gateway-workload.p12      workload mTLS client identities (guide §2)
 #   ca-trust.p12                     truststore containing only the dev CA
 #   idp-signing.pem                  IdP token-signing RSA keypair (PKCS#8; RS256 JWT/JWKS)
-#   ui-builder-signing.pem           portal-bundle signing EC key (PKCS#8; ES256 JWS) — signed-portal-delivery plan
 #
 # Usage: bash infrastructure/pki/dev-pki.sh   (idempotent; regenerates everything)
 set -euo pipefail
@@ -78,10 +77,6 @@ openssl x509 -req -in gateway-workload.csr -CA ca.crt -CAkey ca.key -CAcreateser
 
 echo "==> 6/8 idp token-signing key (RS256; gateway verifies via /idp/jwks)"
 [ -f idp-signing.pem ] || openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out idp-signing.pem >/dev/null 2>&1
-
-#==> 6b/8 portal-bundle signing keypair (ES256; P-256; SPA verifies against build-pinned JWKS)
-[ -f ui-builder-signing.pem ] || openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out ui-builder-signing.pem >/dev/null 2>&1
-[ -f ui-builder-signing-pub.pem ] || openssl ec -in ui-builder-signing.pem -pubout -out ui-builder-signing-pub.pem >/dev/null 2>&1
 
 echo "==> 7/8 PKCS12 keystores (Spring server.ssl)"
 # server identities

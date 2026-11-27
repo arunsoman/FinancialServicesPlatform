@@ -4,3 +4,7 @@ import '@fontsource/figtree/latin-400.css'
 import '@fontsource/figtree/latin-600.css'
 import '@fontsource/figtree/latin-800.css'
 import '@/index.css'
+import { installSubmitGuard } from '@/portals/shared/web-core/submit-guard'
+
+// One press = one action, page-wide: no button/form/mutation can double-fire.
+installSubmitGuard()

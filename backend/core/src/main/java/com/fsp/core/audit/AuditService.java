@@ -56,18 +56,13 @@ public class AuditService {
         r.clientId = RequestCorrelation.clientId();
         UUID home = RequestCorrelation.homeTenantId();
         r.actingTenantId = home == null ? (actor != null ? actor.activeTenantId() : null) : home;
-        r.actSessionId = (home != null && actor != null && actor.type() == Actor.ActorType.DELEGATED)
-            ? actSessionIdFor(actor.personId(), actor.activeTenantId())
+        // plan C6: a write made while acting carries the verified session it ran under
+        r.actSessionId = (home != null && actor != null
+                && (actor.type() == Actor.ActorType.ACTING || actor.type() == Actor.ActorType.DELEGATED))
+            ? RequestCorrelation.actSessionId()
             : null;
         r.simulated = simulated;
         repository.save(r);
-    }
-
-    /** Recover the live act-as session id for a person+target tenant (used only while acting). */
-    private String actSessionIdFor(UUID personId, UUID targetTenantId) {
-        // Best-effort: the session id is not carried on the Actor record. Return null so the
-        // column stays populated only when callers pass it explicitly via the overloaded record.
-        return null;
     }
 
     /** Record with an explicit act session id (used by ActAsService start/end audit). */

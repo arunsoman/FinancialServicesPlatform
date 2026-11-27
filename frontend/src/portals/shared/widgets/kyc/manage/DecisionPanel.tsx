@@ -62,6 +62,15 @@ function Blocked({ view, problem }: { view: CaseView; problem: Problem | null })
       </Alert>
     );
   }
+  if (view.blockedReason === 'CHECKER') {
+    return (
+      <Alert kind="warn">
+        <strong className="block">You aren't enabled as a checker.</strong>
+        Only users with the checker flag can approve, reject or return an application — an administrator
+        can set it on your user (Users → Edit → Checker).
+      </Alert>
+    );
+  }
   // the plugin's own sentence (e.g. "No checker assigned") — shown verbatim, never hidden
   return view.blockedReason && view.blockedReason !== 'STATE' ? <Alert kind="info">{view.blockedReason}</Alert> : null;
 }

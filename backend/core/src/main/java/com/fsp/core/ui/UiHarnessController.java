@@ -25,15 +25,15 @@ public class UiHarnessController {
 
     private final WidgetRegistryService registry;
     private final PortalLayoutService layouts;
-    private final UiBundleService bundles;
-    private final UiSigner signer;
+    private final PortalMenuService menus;
+    private final ApiDiscoveryService discovery;
 
     public UiHarnessController(WidgetRegistryService registry, PortalLayoutService layouts,
-                               UiBundleService bundles, UiSigner signer) {
+                               PortalMenuService menus, ApiDiscoveryService discovery) {
         this.registry = registry;
         this.layouts = layouts;
-        this.bundles = bundles;
-        this.signer = signer;
+        this.menus = menus;
+        this.discovery = discovery;
     }
 
     @FspOperation(id = "ui.widget.register", component = "ui", risk = FspOperation.OperationRisk.WRITE,
@@ -50,6 +50,16 @@ public class UiHarnessController {
     public List<UiDtos.WidgetView> list(HttpServletRequest request) {
         Actor actor = actor(request);
         return registry.list(actor).stream().map(UiHarnessController::toView).toList();
+    }
+
+    /** Live backend API surface (method + path + signature + @FspOperation metadata) for
+     *  the widget workbench LLM prompt — every @RestController handler the system exposes right now. */
+    @FspOperation(id = "ui.backend.apis.read", component = "ui", risk = FspOperation.OperationRisk.READ,
+            permission = "", resource = "TENANT", title = "Discover the live backend API surface (paths + signatures)")
+    @GetMapping("/backend-apis")
+    public List<UiDtos.BackendApiDto> backendApis(HttpServletRequest request) {
+        actor(request);
+        return discovery.discover(request);
     }
 
     @FspOperation(id = "ui.layout.draft.save", component = "ui", risk = FspOperation.OperationRisk.FOUR_EYES,
@@ -81,25 +91,15 @@ public class UiHarnessController {
         return layouts.published(portal, actor(request));
     }
 
-    // -------- signed delivery (plans/signed-portal-delivery-plan.md S1) --------
+    // -------- portal menus --------
 
-    /** The verify-then-render input for slice S2: {payload, digest, jws, kid}. */
-    @FspOperation(id = "ui.bundle.read", component = "ui", risk = FspOperation.OperationRisk.READ,
-            permission = "", resource = "TENANT", title = "Read the signed delivery bundle for a portal")
-    @GetMapping("/bundles/{portal}")
-    public UiDtos.BundleView bundle(@PathVariable String portal, HttpServletRequest request) {
-        actor(request); // authenticated-only, like the published read
-        return bundles.current(portal);
-    }
-
-    /** Public signing keys only (never the private key). The browser's real trust anchor
-     *  remains the JWKS pinned into the SPA at build time — this endpoint is informational. */
-    @FspOperation(id = "ui.truststore.read", component = "ui", risk = FspOperation.OperationRisk.READ,
-            permission = "", resource = "TENANT", title = "Public signing keys for bundle verification")
-    @GetMapping("/trust-store")
-    public List<UiDtos.TrustStoreView> trustStore(HttpServletRequest request) {
-        actor(request);
-        return List.of(signer.jwk());
+    /** A portal's published menus + the widgets that work in it (any signed-in person). */
+    @FspOperation(id = "ui.menu.read", component = "ui", risk = FspOperation.OperationRisk.READ,
+            permission = "", resource = "TENANT", title = "Read a portal's published menus")
+    @GetMapping("/menus/{portal}")
+    public java.util.Map<String, Object> menu(@PathVariable String portal, HttpServletRequest request) {
+        actor(request); // authenticated-only
+        return menus.menu(portal);
     }
 
     private Actor actor(HttpServletRequest request) {
@@ -113,7 +113,7 @@ public class UiHarnessController {
     private static UiDtos.WidgetView toView(UiWidget w) {
         return new UiDtos.WidgetView(w.id, w.version, w.label, w.category, w.bundle,
             parse(w.portals), parse(w.requires), w.bundleSha256, w.status, w.registeredBy,
-            w.updatedAt.toString());
+            w.updatedAt.toString(), w.createdAt == null ? null : w.createdAt.toString());
     }
 
     private static UiDtos.LayoutView toView(UiLayout l) {

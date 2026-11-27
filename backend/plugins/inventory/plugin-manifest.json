@@ -1,0 +1,223 @@
+{
+  "code": "inventory",
+  "version": "1.0.1",
+  "name": "Inventory",
+  "description": "Physical SKU inventory (catalog, stock batches) and digital value inventory (voucher pools, float, dispense). Money moves only through core journal entries.",
+  "operations": [
+    {
+      "id": "inventory.sku.list",
+      "method": "GET",
+      "path": "/v1/plugins/inventory/skus",
+      "permission": "inventory.view"
+    },
+    {
+      "id": "inventory.sku.get",
+      "method": "GET",
+      "path": "/v1/plugins/inventory/skus/{skuId}",
+      "permission": "inventory.view"
+    },
+    {
+      "id": "inventory.sku.create",
+      "method": "POST",
+      "path": "/v1/plugins/inventory/skus",
+      "permission": "inventory.sku.manage"
+    },
+    {
+      "id": "inventory.sku.decide",
+      "method": "POST",
+      "path": "/v1/plugins/inventory/skus/{skuId}/pricing-decision",
+      "permission": "inventory.pricing.approve"
+    },
+    {
+      "id": "inventory.stock.batch.list",
+      "method": "GET",
+      "path": "/v1/plugins/inventory/stock-batches",
+      "permission": "inventory.view"
+    },
+    {
+      "id": "inventory.stock.batch.get",
+      "method": "GET",
+      "path": "/v1/plugins/inventory/stock-batches/{batchId}",
+      "permission": "inventory.view"
+    },
+    {
+      "id": "inventory.stock.batch.create",
+      "method": "POST",
+      "path": "/v1/plugins/inventory/stock-batches",
+      "permission": "inventory.stock.upload"
+    },
+    {
+      "id": "inventory.stock.batch.decide",
+      "method": "POST",
+      "path": "/v1/plugins/inventory/stock-batches/{batchId}/decision",
+      "permission": "inventory.stock.approve"
+    },
+    {
+      "id": "inventory.digital.product.list",
+      "method": "GET",
+      "path": "/v1/plugins/inventory/digital-products",
+      "permission": "digital.view"
+    },
+    {
+      "id": "inventory.digital.product.create",
+      "method": "POST",
+      "path": "/v1/plugins/inventory/digital-products",
+      "permission": "digital.product.manage"
+    },
+    {
+      "id": "inventory.voucher.batch.list",
+      "method": "GET",
+      "path": "/v1/plugins/inventory/voucher-batches",
+      "permission": "digital.view"
+    },
+    {
+      "id": "inventory.voucher.batch.get",
+      "method": "GET",
+      "path": "/v1/plugins/inventory/voucher-batches/{batchId}",
+      "permission": "digital.view"
+    },
+    {
+      "id": "inventory.voucher.batch.upload",
+      "method": "POST",
+      "path": "/v1/plugins/inventory/voucher-batches",
+      "permission": "digital.voucher.upload"
+    },
+    {
+      "id": "inventory.voucher.batch.authorize",
+      "method": "POST",
+      "path": "/v1/plugins/inventory/voucher-batches/{batchId}/authorization",
+      "permission": "digital.voucher.authorize"
+    },
+    {
+      "id": "inventory.voucher.dispense",
+      "method": "POST",
+      "path": "/v1/plugins/inventory/vouchers/dispense",
+      "permission": "digital.dispense"
+    },
+    {
+      "id": "inventory.float.deposit.list",
+      "method": "GET",
+      "path": "/v1/plugins/inventory/float-deposits",
+      "permission": "digital.view"
+    },
+    {
+      "id": "inventory.float.deposit.create",
+      "method": "POST",
+      "path": "/v1/plugins/inventory/float-deposits",
+      "permission": "digital.float.deposit"
+    },
+    {
+      "id": "inventory.float.deposit.decide",
+      "method": "POST",
+      "path": "/v1/plugins/inventory/float-deposits/{depositId}/decision",
+      "permission": "digital.float.deposit"
+    }
+  ],
+  "approvals": [
+    {
+      "action": "SKU_PRICING",
+      "makerPermission": "inventory.sku.manage",
+      "checkerPermission": "inventory.pricing.approve"
+    },
+    {
+      "action": "STOCK_RECEIPT",
+      "makerPermission": "inventory.stock.upload",
+      "checkerPermission": "inventory.stock.approve"
+    },
+    {
+      "action": "VOUCHER_RELEASE",
+      "makerPermission": "digital.voucher.upload",
+      "checkerPermission": "digital.voucher.authorize"
+    },
+    {
+      "action": "FLOAT_FUNDING",
+      "makerPermission": "digital.float.deposit",
+      "checkerPermission": "digital.float.deposit"
+    }
+  ],
+  "client": {
+    "jwks": {
+      "keys": [
+        {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "4xLKRICIYvvIbm9fPjqp6E1UZ0SCvZD5HchlY__S5Zo",
+          "y": "QFlThO3J1jgsnB6w8jdEn5YbuorWmzxh0JYFc8gy7nQ",
+          "use": "sig",
+          "alg": "ES256",
+          "kid": "zuT6ltT6THszoRQv1ZUXLQp7H0iTvM13qMqCdIvyP0M"
+        }
+      ]
+    },
+    "grants": [
+      {
+        "permission": "inventory.view",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "inventory.sku.manage",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "inventory.pricing.approve",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "inventory.stock.upload",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "inventory.stock.approve",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "digital.view",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "digital.product.manage",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "digital.voucher.upload",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "digital.voucher.authorize",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "digital.float.deposit",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "digital.dispense",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "je.create",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "je.approve",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "je.post.immediate",
+        "kind": "ON_BEHALF"
+      },
+      {
+        "permission": "gl.account.create",
+        "kind": "MACHINE"
+      },
+      {
+        "permission": "gl.account.view",
+        "kind": "MACHINE"
+      },
+      {
+        "permission": "plugin.manage",
+        "kind": "MACHINE"
+      }
+    ]
+  }
+}

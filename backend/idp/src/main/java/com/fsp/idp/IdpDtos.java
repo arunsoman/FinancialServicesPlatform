@@ -9,7 +9,9 @@ public final class IdpDtos {
     private IdpDtos() {}
 
     // --- Token endpoint (existing ROPC - will be deprecated) ---
-    public record TokenGrant(String grantType, String username, String password, String clientId) {}
+    public record TokenGrant(String grantType, String username, String password, String clientId,
+                             /** V30 MFA: the second-factor code when the person enrolled one. */
+                             String otp) {}
 
     // --- FAPI 2.0 machine-plane: client_credentials + private_key_jwt + DPoP ---
     public record ClientCredentialsGrant(String grantType, String clientId, String clientAssertion,
@@ -50,7 +52,12 @@ public final class IdpDtos {
     public record TokenClaims(String userId, String username, String fullName, String tenantId,
                               String tenantName, String tenantType, List<String> roles) {}
 
-    public record TokenResponse(String accessToken, String tokenType, long expiresIn, TokenClaims claims) {}
+    /** refreshToken: only on the authorization_code grant (never rotated, never sent to a browser). */
+    public record TokenResponse(String accessToken, String tokenType, long expiresIn, TokenClaims claims, String refreshToken) {
+        public TokenResponse(String accessToken, String tokenType, long expiresIn, TokenClaims claims) {
+            this(accessToken, tokenType, expiresIn, claims, null);
+        }
+    }
 
     // --- DPoP ---
     public record DPoPProof(String htu, String htm, String jti, long iat, String cnf) {}

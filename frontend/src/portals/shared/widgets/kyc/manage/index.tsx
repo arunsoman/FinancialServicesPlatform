@@ -17,13 +17,13 @@ import { KycManage } from './widget';
 
 const kycManageWidget = defineWidget({
   id: 'kyc.manage',
-  version: '1.0.0',
+  version: '1.1.0',
   label: 'KYC applications',
   description: 'List, search, view, add, edit and decide KYC applications — server-side paging, search and sorting.',
   category: 'Onboarding',
   contexts: ['ANY'],
   requires: ['kyc.review'],
-  sources: ['kyc.cases.page', 'kyc.case.view', 'kyc.case.history', 'kyc.master.list'],
+  sources: ['kyc.cases.page', 'kyc.case.view', 'kyc.case.history', 'kyc.master.list', 'kyc.orgs.self'],
   commands: ['kyc.case.create', 'kyc.case.update', 'kyc.case.submit', 'kyc.case.decide'],
   actions: [
     { id: 'kyc.case.create', label: 'New application', cell: 'org.onboard_child', command: 'kyc.case.create', kind: 'primary' },

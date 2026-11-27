@@ -176,12 +176,136 @@ public class JournalService {
         entry.status = JournalEntry.Status.PENDING_CHECKER;
         entryRepository.save(entry);
         log.info("je_submitted entryId={} makerId={} for four-eyes approval", entry.id, entry.makerId);
-        approvalService.open(tenantId, ApprovalRequest.OpType.JE_POSTING, entryId, actor, "entry:" + entryId, null);
-
         audit.record(actor.personId(), null, tenantId, entry.bookId, "JE_SUBMITTED", "JOURNAL_ENTRY",
             entry.id.toString(), audit.hashState("status=DRAFT"), audit.hashState("status=PENDING_CHECKER"), false);
         outbox.record("JournalEntry", entry.id, "JournalEntry.Submitted", txSnapshot(entry).payload());
-        return view(entry, lineRepository.findByEntryIdOrderByLineNoAsc(entry.id));
+        ApprovalRequest approval = approvalService.open(tenantId, ApprovalRequest.OpType.JE_POSTING, entryId,
+            actor, "entry:" + entryId, null);
+        List<JournalLine> submitted = lineRepository.findByEntryIdOrderByLineNoAsc(entry.id);
+        var v = view(entry, submitted);
+        return new JournalDtos.EntryView(v.entryId(), v.tenantId(), v.bookId(), v.currency(), v.entryType(),
+            v.postingDate(), v.valueDate(), v.description(), v.reference(), v.totalDebits(), v.totalCredits(),
+            v.status(), v.planHash(), v.tbTransferIds(), v.makerId(), v.checkerId(), v.finalizedAt(),
+            v.version(), v.lines(), approval.id);
+    }
+
+    // ---------------- posting intents (single-actor fast path, plans/inventory-plugin-plan.md D3) ----------------
+
+    /**
+     * POST /v1/tenants/{tenantId}/journal/intents — one-actor immediate posting for flows that
+     * deliberately configure no per-item four-eyes (POS/airtime retail dispense)
+     * (plans/inventory-plugin-plan.md D3).
+     * Money invariants are NOT relaxed: the JE must balance, fall inside an OPEN period, plan,
+     * and dispatch through the SAME PostingPlanner + JournalTx + KeyLocks pipeline; it is audited
+     * with the acting person (je.post.immediate must be specifically granted).
+     * Orchestration mirrors approveAndPost: validate + plan (no tx) → persist PENDING_CHECKER (tx,
+     * via JournalTx) → lock → saveReady (tx) → dispatch (no tx) → terminal transition (tx).
+     */
+    public JournalDtos.EntryView postIntent(UUID tenantId, JournalDtos.CreateEntryRequest req, Actor actor) {
+        permissions.require(actor, "je.post.immediate", tenantId);
+        var book = bookRepository.findById(req.bookId())
+            .orElseThrow(() -> ApiException.notFound("BOOK_NOT_FOUND", "Book not found"));
+        if (!book.tenantId.equals(tenantId)) throw ApiException.forbidden("TENANT_MISMATCH", "Book out of scope");
+        if (req.lines() == null || req.lines().size() < 2) {
+            throw ApiException.badRequest("JE_LINES", "At least 2 lines are required");
+        }
+        if (req.postingDate() == null) throw ApiException.badRequest("JE_DATE", "postingDate is required");
+
+        List<ParsedLine> parsed = parseLines(req.lines(), book);
+        UUID periodId = openPeriodId(book.id, req.postingDate());
+
+        long debitsTotal = parsed.stream().filter(l -> l.direction().equals("DEBIT"))
+            .mapToLong(ParsedLine::amount).sum();
+        long creditsTotal = parsed.stream().filter(l -> l.direction().equals("CREDIT"))
+            .mapToLong(ParsedLine::amount).sum();
+        if (debitsTotal == 0 || debitsTotal != creditsTotal) {
+            throw ApiException.badRequest("JE_NOT_BALANCED",
+                "debits=%d credits=%d — a JE must balance within its book and currency".formatted(debitsTotal, creditsTotal));
+        }
+        var debitAccounts = parsed.stream().filter(l -> l.direction().equals("DEBIT"))
+            .map(ParsedLine::glAccountId).distinct().toList();
+        parsed.stream().filter(l -> l.direction().equals("CREDIT"))
+            .map(ParsedLine::glAccountId).distinct()
+            .filter(debitAccounts::contains)
+            .findFirst()
+            .ifPresent(a -> { throw ApiException.badRequest("JE_SAME_ACCOUNT",
+                "Same GL account on both sides is not allowed"); });
+
+        JournalEntry entry = new JournalEntry();
+        entry.id = UUID.randomUUID();
+        entry.tenantId = tenantId;
+        entry.bookId = book.id;
+        entry.periodId = periodId;
+        entry.entryType = "INTENT";
+        entry.postingDate = req.postingDate();
+        entry.valueDate = req.valueDate() == null ? req.postingDate() : req.valueDate();
+        entry.description = req.description();
+        entry.reference = req.reference();
+        entry.currency = book.currency;
+        entry.makerId = actor.personId();
+        entry.totalDebits = BigDecimal.valueOf(debitsTotal);
+        entry.totalCredits = BigDecimal.valueOf(creditsTotal);
+
+        List<JournalLine> lines = new ArrayList<>(parsed.size());
+        int lineNo = 1;
+        for (ParsedLine p : parsed) {
+            JournalLine line = new JournalLine();
+            line.id = UUID.randomUUID();
+            line.entryId = entry.id;
+            line.lineNo = lineNo++;
+            line.glAccountId = p.glAccountId();
+            line.direction = p.direction();
+            line.amount = BigDecimal.valueOf(p.amount());
+            line.memo = p.memo();
+            lines.add(line);
+        }
+
+        PostingPlanner.Plan plan;
+        try {
+            plan = PostingPlanner.plan(entry.id, specs(lines));
+        } catch (PostingPlanner.JeInvariantException e) {
+            throw ApiException.badRequest("JE_PLAN_INVALID", e.getMessage());
+        }
+        List<String> legIds = plan.legs().stream().map(l -> l.transferId().toString()).toList();
+
+        journalTx.persistIntent(entry, lines);
+        log.info("je_intent_prepared entryId={} reference={} legs={}", entry.id, req.reference(), legIds.size());
+
+        JournalDtos.EntryView view = keyLocks.withLock("je-approval", entry.id, () -> {
+            // dispatch serialization identical to the approval path; saveReady's DB status
+            // precondition (PENDING_CHECKER) is the cross-instance backstop
+            journalTx.saveReady(entry.id, plan.planHash(), legIds, actor.personId());
+            PostingOutcome outcome = dispatch(book, entry, plan, lines);
+            return switch (outcome) {
+                case PostingOutcome.Committed ignored -> viewOf(journalTx.finalizeFromReady(entry.id));
+                case PostingOutcome.Rejected rejected -> viewOf(journalTx.rejectFromReady(entry.id, rejected.detail()));
+                case PostingOutcome.Unknown ignored -> viewOf(journalTx.markUnknown(entry.id, "response lost"));
+            };
+        });
+        switch (view.status()) {
+            case "FINALIZED" -> log.info("je_intent_committed entryId={} reference={} legs={}",
+                entry.id, req.reference(), legIds.size());
+            case "REJECTED" -> log.warn("je_intent_posting_rejected entryId={} reference={} status={}",
+                entry.id, req.reference(), view.status());
+            default -> log.error("je_commit_unknown entryId={} reference={} status={} — awaiting check-status",
+                entry.id, req.reference(), view.status());
+        }
+        audit.record(actor.personId(), null, tenantId, entry.bookId, "JE_INTENT_POSTED", "JOURNAL_ENTRY",
+            entry.id.toString(), audit.hashState("prepared"),
+            audit.hashState("status=" + view.status() + ";reference=" + req.reference()), false);
+        return view;
+    }
+
+    /** OPEN-period fence: an intent (like a draft) may only post inside an OPEN period. */
+    private UUID openPeriodId(UUID bookId, LocalDate postingDate) {
+        return periodRepository.findByBookIdOrderByFiscalYearDescPeriodNoDesc(bookId).stream()
+            .filter(p -> "OPEN".equals(p.status))
+            .filter(p -> !postingDate.isBefore(p.startDate))
+            .filter(p -> !postingDate.isAfter(p.endDate))
+            .findFirst()
+            .map(p -> p.id)
+            .orElseThrow(() -> ApiException.conflict("PERIOD_NOT_OPEN",
+                "No OPEN accounting period covers " + postingDate + " for book " + bookId));
     }
 
     // ---------------- approve (checker): plan persisted BEFORE submission ----------------
@@ -490,6 +614,6 @@ public class JournalService {
         return new JournalDtos.EntryView(je.id, je.tenantId, je.bookId, je.currency, je.entryType,
             je.postingDate, je.valueDate, je.description, je.reference,
             je.totalDebits.toPlainString(), je.totalCredits.toPlainString(),
-            je.status, je.planHash, ids, je.makerId, je.checkerId, je.finalizedAt, je.version, lineViews);
+            je.status, je.planHash, ids, je.makerId, je.checkerId, je.finalizedAt, je.version, lineViews, null);
     }
 }

@@ -74,12 +74,23 @@ public class PluginRegistryService {
     /** Called by the PLUGIN_REGISTER approval handler after the checker approves. */
     @Transactional
     public PluginType approve(String code, String version, Actor checker) {
-        List<PluginType> pending = types.findByCodeAndStatus(code, "PENDING_APPROVAL");
-        if (pending.isEmpty()) {
-            throw ApiException.notFound("PLUGIN_TYPE_NOT_PENDING",
-                "Plugin type %s@%s is not pending approval".formatted(code, version));
+        // the approved version, never "whichever pending row of this code comes first"
+        PluginType type = types.findByCodeAndStatus(code, "PENDING_APPROVAL").stream()
+            .filter(t -> version == null || version.equals(t.version))
+            .findFirst()
+            .orElseThrow(() -> ApiException.notFound("PLUGIN_TYPE_NOT_PENDING",
+                "Plugin type %s@%s is not pending approval".formatted(code, version)));
+        // One REGISTERED version per code: the gateway's routes, the manifest's declared
+        // approvals and its grants are read per code, so an older registration is superseded
+        // (DEACTIVATED) in the same transaction. Installations are per code and keep running.
+        for (PluginType older : types.findByCodeAndStatus(code, "REGISTERED")) {
+            older.status = "DEACTIVATED";
+            types.save(older);
+            audit.record(null, checker.personId(), checker.activeTenantId(), null,
+                "PLUGIN_SUPERSEDED", "PLUGIN_TYPE", older.id.toString(),
+                null, audit.hashState("code=" + code + ";version=" + older.version + ";supersededBy=" + type.version), false);
+            log.info("plugin_superseded code={} version={} by={}", code, older.version, type.version);
         }
-        PluginType type = pending.get(0);
         type.status = "REGISTERED";
         type.approvedBy = checker.personId();
         type.approvedAt = Instant.now();

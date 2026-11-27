@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { Alert, Button, Chip, KvPair, StatusBadge } from '../../../ui/atoms';
+import { Link } from 'react-router-dom';
+import { Alert, Button, Chip, KvPair } from '../../../ui/atoms';
 import { InlineConfirm } from '../../kit/InlineConfirm';
 import { UserAvatar } from './UserAvatar';
-import { absoluteTime, relativeTime } from './model';
+import { UserStatusBadge } from './UserStatusBadge';
+import { absoluteTime, awaitingActivation, relativeTime } from './model';
 import type { Problem, UserRow } from './model';
 
 export interface UserDetailsProps {
@@ -14,14 +16,18 @@ export interface UserDetailsProps {
   onDeactivate: () => void;
   onActivate: () => void;
   onRemove: () => void;
+  /** re-send the IdP activation (approved users who haven't set a password yet) */
+  onResend: () => void;
   onReload: () => void;
+  /** viewing another org without acting as it: show the record, offer no lifecycle action */
+  readOnly?: boolean;
 }
 
-type Pending = 'deactivate' | 'remove' | null;
+type Pending = 'deactivate' | 'remove' | 'resend' | null;
 
 /** Read-only view of one user + every lifecycle action available from its current state. */
 export function UserDetails({
-  user, isMe, busy, problem, onEdit, onDeactivate, onActivate, onRemove, onReload,
+  user, isMe, busy, problem, onEdit, onDeactivate, onActivate, onRemove, onResend, onReload, readOnly = false,
 }: UserDetailsProps) {
   const [pending, setPending] = useState<Pending>(null);
   const removed = user.status === 'ARCHIVED';
@@ -36,7 +42,7 @@ export function UserDetails({
             <div className="truncate text-lg font-extrabold">{user.fullName}</div>
             <div className="mono text-dim truncate">@{user.username}</div>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
-              <StatusBadge status={user.status} />
+              <UserStatusBadge status={user.status} activated={user.activated} />
               {isMe && <Chip tone="info">You</Chip>}
               {user.isApplicant && <Chip>KYC applicant</Chip>}
               {user.checker && <Chip tone="info">Checker</Chip>}
@@ -55,6 +61,40 @@ export function UserDetails({
           </Alert>
         )}
 
+        {user.status === 'PENDING' && (
+          <Alert kind="warn">
+            Awaiting approval — a checker other than the person who added this user must approve it in{' '}
+            <Link className="underline" to="/approvals">Approvals</Link>. Until then the user can’t sign in and holds no roles.
+          </Alert>
+        )}
+        {awaitingActivation(user) && (
+          <Alert kind="info">
+            Approved — waiting for {user.fullName.split(' ')[0]} to set their password from the{' '}
+            {user.primaryContact === 'PHONE' ? 'SMS code sent to their phone' : 'link sent to their email'}. They can’t sign in until
+            they have.
+            {!readOnly && pending !== 'resend' && (
+              <button type="button" className="ml-2 font-extrabold underline" disabled={busy} onClick={() => setPending('resend')}>
+                Re-send activation
+              </button>
+            )}
+          </Alert>
+        )}
+        {pending === 'resend' && (
+          <InlineConfirm
+            title="Send a new activation?"
+            confirmLabel={user.primaryContact === 'PHONE' ? 'Send SMS code' : 'Send email link'}
+            tone="primary"
+            busy={busy}
+            onCancel={() => setPending(null)}
+            onConfirm={() => {
+              onResend();
+              setPending(null);
+            }}
+          >
+            A new one-time {user.primaryContact === 'PHONE' ? 'code' : 'link'} goes to {user.primaryContact === 'PHONE' ? user.phone : user.email}.
+            Any earlier one stops working.
+          </InlineConfirm>
+        )}
         {user.status === 'DISABLED' && (
           <Alert kind="warn">Deactivated — this user can’t sign in and holds no permissions until reactivated.</Alert>
         )}
@@ -126,7 +166,7 @@ export function UserDetails({
         )}
       </div>
 
-      {!removed && (
+      {!removed && !readOnly && (
         <div className="flex flex-wrap items-center gap-2 border-t border-line p-4">
           <Button variant="primary" onClick={onEdit} disabled={busy}>
             Edit

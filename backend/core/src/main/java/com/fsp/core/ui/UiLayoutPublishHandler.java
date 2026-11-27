@@ -10,22 +10,38 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Publishes (or rejects) a portal layout when its {@code UI_LAYOUT_PUBLISH} approval resolves. */
+/**
+ * Publishes (or rejects) a portal layout when its {@code UI_LAYOUT_PUBLISH} approval resolves.
+ *
+ * <p>Maker-checker integrity: the checker decides on the SUBMITTED snapshot
+ * ({@code approval.payload}, taken by {@code PortalLayoutService.submit}); this handler
+ * publishes that snapshot — never the current draft row, which a four-eyes-compliant flow
+ * cannot mutate while the approval is pending anyway (draft is locked). Publishing is
+ * DB-only (the layout row), so it is {@link #atomicWithResolution() atomic
+ * with the approval resolution}: a failure rolls the decision back instead of
+ * stranding an APPROVED-but-unpublished layout.</p>
+ */
 @Slf4j
 @Component
 public class UiLayoutPublishHandler implements ApprovalHandler {
 
     private final UiLayoutRepository layouts;
-    private final UiBundleService bundles;
+    private final LayoutValidator validator;
 
-    public UiLayoutPublishHandler(UiLayoutRepository layouts, UiBundleService bundles) {
+    public UiLayoutPublishHandler(UiLayoutRepository layouts, LayoutValidator validator) {
         this.layouts = layouts;
-        this.bundles = bundles;
+        this.validator = validator;
     }
 
     @Override
     public String operationType() {
         return ApprovalRequest.OpType.UI_LAYOUT_PUBLISH;
+    }
+
+    /** DB-only effect (the layout row) — must commit or roll back WITH the approval row. */
+    @Override
+    public boolean atomicWithResolution() {
+        return true;
     }
 
     @Override
@@ -42,6 +58,18 @@ public class UiLayoutPublishHandler implements ApprovalHandler {
                 draft.portal, draft.id, checker.username());
             return;
         }
+        // Publish exactly what the checker approved: the submit-time snapshot, re-validated
+        // (defense in depth — the snapshot was validated at draft save, but a stale/corrupt
+        // payload must be refused here, not persisted into the live row).
+        if (approval.payload == null || approval.payload.isBlank()) {
+            // Should not happen for UI_LAYOUT_PUBLISH (submit always snapshots the layout);
+            // refuse to publish blind rather than falling back to unreviewed draft state.
+            log.error("ui_layout_publish_no_payload approvalId={} layoutId={}",
+                approval.id, draft.id);
+            throw new IllegalStateException(
+                "UI_LAYOUT_PUBLISH approval without a submitted layout snapshot: " + approval.id);
+        }
+        String approvedJson = validator.validate(approval.payload);
         UiLayout live = layouts.findFirstByPortalAndStatus(draft.portal, UiLayout.Status.PUBLISHED)
             .orElseGet(() -> {
                 UiLayout fresh = new UiLayout();
@@ -51,15 +79,12 @@ public class UiLayoutPublishHandler implements ApprovalHandler {
                 fresh.createdAt = Instant.now();
                 return fresh;
             });
-        live.layoutJson = draft.layoutJson;
+        live.layoutJson = approvedJson;
         live.schemaVersion = draft.schemaVersion;
         live.makerId = draft.makerId;
         live.publishedApprovalId = approval.id;
         live.updatedAt = Instant.now();
         layouts.save(live);
-        // Sign-on-publish (plans/signed-portal-delivery-plan.md S1): the delivery bundle is
-        // minted in the SAME transaction as the publish — approval and signature move together.
-        bundles.generate(live.portal);
         log.info("ui_layout_published portal={} layoutId={} approvalId={} checker={}",
             live.portal, live.id, approval.id, checker.username());
     }

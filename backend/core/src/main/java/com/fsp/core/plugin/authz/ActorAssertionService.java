@@ -2,6 +2,8 @@ package com.fsp.core.plugin.authz;
 
 import com.fsp.core.common.Actor;
 import com.fsp.core.common.ApiException;
+import com.fsp.core.common.RequestCorrelation;
+import com.fsp.core.actas.ActAsService;
 import com.fsp.shared.ActorAssertion;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,6 +18,11 @@ import java.util.UUID;
  *
  * The assertion must be addressed to THIS client's plugin (aud plugin:&lt;code&gt;, client id
  * plugin-&lt;code&gt;), so a plugin can never replay another plugin's assertion.
+ *
+ * Act-as through a plugin (plans/act-as-tenant-plan.md): when the assertion states an act-as
+ * session, core re-verifies it here — live, this person's, this target — and records the home
+ * tenant + session for the request, so PermissionService caps the person by the target's
+ * ceiling and every audit row names the session. The gateway's word is never enough.
  */
 @Slf4j
 @Service
@@ -24,9 +31,11 @@ public class ActorAssertionService implements com.fsp.core.common.ActorContextFi
     private static final String CLIENT_PREFIX = "plugin-";
 
     private final ActorAssertion assertion;
+    private final ActAsService actAs;
 
-    public ActorAssertionService(ActorAssertion assertion) {
+    public ActorAssertionService(ActorAssertion assertion, ActAsService actAs) {
         this.assertion = assertion;
+        this.actAs = actAs;
     }
 
     @Override
@@ -39,8 +48,20 @@ public class ActorAssertionService implements com.fsp.core.common.ActorContextFi
         String audience = "plugin:" + clientId.substring(CLIENT_PREFIX.length());
         try {
             ActorAssertion.VerifiedActor va = assertion.verify(assertionJwt, audience, null, null);
-            Actor delegated = new Actor(UUID.fromString(va.personId()), va.username(),
-                UUID.fromString(va.tenantId()), Actor.ActorType.DELEGATED, clientId);
+            UUID personId = UUID.fromString(va.personId());
+            UUID tenantId = UUID.fromString(va.tenantId());
+            if (va.acting()) {
+                ActAsService.Live live = actAs.live(va.actSessionId(), personId);
+                if (live == null || !live.targetTenantId().equals(tenantId)
+                    || !String.valueOf(live.homeTenantId()).equals(va.homeTenantId())) {
+                    log.warn("assertion_act_as_rejected client={} person={} session={}",
+                        clientId, personId, va.actSessionId());
+                    throw ApiException.unauthorized("ACT_AS_EXPIRED", "Your session acting as another tenant has ended");
+                }
+                RequestCorrelation.setHomeTenantId(live.homeTenantId());
+                RequestCorrelation.setActSessionId(live.id());
+            }
+            Actor delegated = new Actor(personId, va.username(), tenantId, Actor.ActorType.DELEGATED, clientId);
             log.debug("assertion_delegated client={} person={} op={} jti={}",
                 clientId, va.personId(), va.operationId(), va.jti());
             return delegated;

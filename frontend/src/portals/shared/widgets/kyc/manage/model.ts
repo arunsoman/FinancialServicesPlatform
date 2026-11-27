@@ -4,6 +4,8 @@
  * widget port, so the ONE network path (port → BFF → gateway → plugin) is preserved and
  * paging / search / sorting are always the SERVER's (the widget never filters a page).
  */
+import { contactSchema, contactToWire, emptyContact } from '../../kit/contact';
+import type { ContactValues } from '../../kit/contact';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as z from 'zod';
 import { ApiError } from '../../../web-core/api';
@@ -47,8 +49,10 @@ export interface CaseSummary {
   subjectTenantId: string | null;
   legalName: string;
   dbaName: string | null;
-  subType: SubType;
-  registrationNumber: string;
+  /** null for a CUSTOMER case (a person, not an organization) */
+  subType: SubType | null;
+  /** null for a CUSTOMER case */
+  registrationNumber: string | null;
   status: CaseStatus;
   riskRating: Risk | null;
   submittedAt: string | null;
@@ -58,6 +62,10 @@ export interface CaseSummary {
   version: number;
   /** plan field, not yet on the plugin's summary — status STALLED carries it there */
   stalled?: boolean;
+  /** V2: ORGANIZATION | CUSTOMER; customers: primary contact + whether they activated */
+  caseKind?: 'ORGANIZATION' | 'CUSTOMER';
+  primaryContact?: 'EMAIL' | 'PHONE' | null;
+  contactVerified?: boolean | null;
 }
 
 export interface UboView {
@@ -163,7 +171,7 @@ export interface CaseHistoryResponse {
 }
 
 export interface MasterValue {
-  category: 'entityType' | 'idDocType' | 'accountType' | 'bank' | 'region' | 'mcc' | 'nationality';
+  category: 'entityType' | 'idDocType' | 'accountType' | 'bank' | 'region' | 'mcc' | 'nationality' | 'gender';
   code: string;
   label: string;
 }
@@ -205,6 +213,7 @@ export function listParams(q: ListQuery): Record<string, string> {
   if (q.q.trim().length >= 2) out.q = q.q.trim();
   if (q.status.length) out.status = q.status.join(',');
   if (q.risk.length) out.risk = q.risk.join(',');
+  out.kind = 'ORGANIZATION'; // customers live in their own widget (kyc.customers)
   return out;
 }
 
@@ -228,7 +237,7 @@ export function toProblem(err: unknown): Problem {
 export const isNotReady = (p: Problem | null) => p?.status === 503 && p.code === 'PLUGIN_NOT_READY';
 
 /** GETs retry once on transient failures only — never on 4xx or "plugin not ready". */
-function retryRead(n: number, err: unknown): boolean {
+export function retryRead(n: number, err: unknown): boolean {
   const s = err instanceof ApiError ? err.status : 0;
   return n < 1 && (s === 0 || (s >= 500 && s !== 503));
 }
@@ -274,7 +283,7 @@ export function useCaseHistory(port: WidgetDataPortLike, caseId: string, enabled
 /** The plugin's reference-data categories (GET /v1/plugins/kyc/master-values) → the form's fields. */
 const WIRE_CATEGORY: Record<string, MasterValue['category']> = {
   ENTITY_TYPE: 'entityType', DOC_TYPE: 'idDocType', ACCOUNT_TYPE: 'accountType', BANK: 'bank',
-  REGION: 'region', MCC: 'mcc', COUNTRY: 'nationality',
+  REGION: 'region', MCC: 'mcc', COUNTRY: 'nationality', GENDER: 'gender',
 };
 
 export interface WireMasterValue { category: string; code: string; label: string }
@@ -398,8 +407,9 @@ export const STEPS = [
   { id: 'company', label: 'Company' },
   { id: 'business', label: 'Business' },
   { id: 'addresses', label: 'Addresses' },
-  { id: 'owners', label: 'Owners' },
+  { id: 'owners', label: 'UBO' },
   { id: 'banking', label: 'Bank accounts' },
+  { id: 'access', label: 'Sign-in' },
 ] as const;
 export type StepId = (typeof STEPS)[number]['id'];
 
@@ -450,6 +460,8 @@ const stepSchemas = {
       if (total > 100) ctx.addIssue({ code: 'custom', path: ['ubos'], message: `Ownership adds up to ${total}% — it can’t exceed 100%` });
     }),
   banking: z.object({ bankAccounts: z.array(bankSchema).min(1, 'Add the settlement bank account') }),
+  // V2: the new org's administrator + checker activate by link/code on their primary contact
+  access: z.object({ admin: contactSchema, checker: contactSchema }),
 } satisfies Record<StepId, z.ZodTypeAny>;
 
 export interface CaseFormValues {
@@ -475,6 +487,9 @@ export interface CaseFormValues {
   operationalPostal: string;
   ubos: z.infer<typeof uboSchema>[];
   bankAccounts: z.infer<typeof bankSchema>[];
+  /** create only: who runs the new organization (each gets an activation, no shared password) */
+  admin: ContactValues;
+  checker: ContactValues;
 }
 export type UboValues = CaseFormValues['ubos'][number];
 export type BankValues = CaseFormValues['bankAccounts'][number];
@@ -498,6 +513,7 @@ export function stepOf(path: string): StepId {
   const head = path.split('.')[0];
   if (head === 'ubos') return 'owners';
   if (head === 'bankAccounts') return 'banking';
+  if (head === 'admin' || head === 'checker') return 'access';
   if (head.startsWith('registered') || head.startsWith('operational')) return 'addresses';
   if (['mccCode', 'websiteUrl', 'expectedMonthlyVolume', 'avgTicketSize'].includes(head)) return 'business';
   return 'company';
@@ -505,6 +521,7 @@ export function stepOf(path: string): StepId {
 
 /** Plugin problem code → the field it belongs to (otherwise a form-level message). */
 export const FIELD_FOR_CODE: Record<string, string> = {
+  CONTACT_REQUIRED: 'admin.email',
   REGISTRATION_TAKEN: 'registrationNumber',
   REGISTRATION_INVALID: 'registrationNumber',
   TIN_INVALID: 'taxId',
@@ -529,13 +546,14 @@ export function emptyForm(): CaseFormValues {
     registeredAddress: '', registeredCity: '', registeredRegion: '', registeredPostal: '',
     operationalAddressSame: true, operationalAddress: '', operationalCity: '', operationalRegion: '', operationalPostal: '',
     ubos: [emptyUbo()], bankAccounts: [emptyBank()],
+    admin: emptyContact(), checker: emptyContact(),
   };
 }
 
 export function formFromView(v: CaseView): CaseFormValues {
   return {
-    subType: v.subType, legalName: v.legalName, dbaName: v.dbaName ?? '', entityType: v.entityType,
-    registrationNumber: v.registrationNumber, incorporationDate: v.incorporationDate, taxId: v.taxId,
+    subType: v.subType ?? '', legalName: v.legalName, dbaName: v.dbaName ?? '', entityType: v.entityType,
+    registrationNumber: v.registrationNumber ?? '', incorporationDate: v.incorporationDate, taxId: v.taxId,
     mccCode: v.mccCode, websiteUrl: v.websiteUrl ?? '',
     expectedMonthlyVolume: minorToMajor(v.expectedMonthlyVolume), avgTicketSize: minorToMajor(v.avgTicketSize),
     registeredAddress: v.registeredAddress, registeredCity: v.registeredCity, registeredRegion: v.registeredRegion,
@@ -550,6 +568,8 @@ export function formFromView(v: CaseView): CaseFormValues {
       id: b.id, holderName: b.holderName, bankName: b.bankName, branchCode: b.branchCode,
       accountNumber: b.accountNumber, accountType: b.accountType,
     })),
+    // edit never changes the org's people (they exist in core already)
+    admin: emptyContact(), checker: emptyContact(),
   };
 }
 
@@ -589,6 +609,8 @@ export function toWire(v: CaseFormValues) {
       holderName: b.holderName.trim(), bankName: b.bankName, branchCode: b.branchCode.trim(),
       accountNumber: keep(b.accountNumber), accountType: b.accountType,
     })),
+    admin: contactToWire(v.admin),
+    checker: contactToWire(v.checker),
   };
 }
 export type CaseWireBody = ReturnType<typeof toWire>;
@@ -639,4 +661,34 @@ export function reviewDue(iso: string | null): 'overdue' | 'soon' | null {
   if (!iso) return null;
   const days = (new Date(iso).getTime() - Date.now()) / 86_400_000;
   return days < 0 ? 'overdue' : days < 30 ? 'soon' : null;
+}
+
+/**
+ * The only organization type `orgId` may onboard — core's ladder (TenantLadder:
+ * Platform → Manufacturer → Distributor → Wholesaler → Merchant). null = it onboards none.
+ * Core re-decides on create; this only fixes the form so a wrong type is never filed
+ * (the KYC case would otherwise be saved before core refuses the org).
+ */
+export function useNextLevel(port: WidgetDataPortLike, orgId: string) {
+  const q = useQuery({
+    queryKey: ['tenant', 'next-level', orgId],
+    queryFn: () => port.request<{ legalName?: string; childSubType?: string | null }>('kyc.orgs.self', { tenantId: orgId }),
+    enabled: orgId !== '',
+  });
+  const childSubType = (q.data?.childSubType ?? null) as CaseFormValues['subType'] | null;
+  const label = childSubType ? childSubType.charAt(0) + childSubType.slice(1).toLowerCase() : null;
+  return { childSubType, label, orgName: q.data?.legalName ?? 'this organization', loaded: q.isSuccess };
+}
+
+/* ------------------------------------------------- the org-type ladder */
+export const SUB_OPTIONS = SUB_TYPES.map((s) => ({ value: s, label: s.charAt(0) + s.slice(1).toLowerCase() }));
+
+/**
+ * New applications offer ONLY the child level of the signed-in org (core TenantLadder) — never
+ * a sibling or a level above; with the level unknown nothing is offered. An existing case shows
+ * the type it already has (fixed once the organization exists).
+ */
+export function subTypeOptions(mode: 'create' | 'edit', lockedSubType: string | undefined, current: string) {
+  if (mode === 'edit') return SUB_OPTIONS.filter((o) => o.value === current);
+  return lockedSubType ? SUB_OPTIONS.filter((o) => o.value === lockedSubType) : [];
 }

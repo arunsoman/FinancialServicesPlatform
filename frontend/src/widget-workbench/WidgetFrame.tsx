@@ -108,7 +108,10 @@ export function WidgetFrame({ tier, setup, single, focused, onFocus, onCalls, re
           {width}px · {tier} · {span === null ? 'hidden' : `span ${span}/${cols}`}
         </span>
         <span className="grow" />
-        <span className={`st st-${state}`} data-frame-state>{state}</span>
+        <span className={`st st-${state}`} data-frame-state aria-live="polite"
+          title={state === 'forbidden' ? 'Cells held do not satisfy the widget\'s requires, or a source returned 403' : `Frame state: ${state}`}>
+          {state}
+        </span>
       </header>
       <div className="page" style={pageStyle}>
         {setup.grid && (

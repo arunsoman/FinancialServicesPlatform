@@ -13,10 +13,13 @@ import java.util.Map;
 public class RbacController {
 
     private final PermissionService permissionService;
+    private final MenuAccessService menuAccess;
     private final com.fsp.core.identity.PersonRepository persons;
 
-    public RbacController(PermissionService permissionService, com.fsp.core.identity.PersonRepository persons) {
+    public RbacController(PermissionService permissionService, MenuAccessService menuAccess,
+                          com.fsp.core.identity.PersonRepository persons) {
         this.permissionService = permissionService;
+        this.menuAccess = menuAccess;
         this.persons = persons;
     }
 
@@ -29,7 +32,10 @@ public class RbacController {
             .toList();
     }
 
-    @FspOperation(id = "rbac.permission.me", component = "rbac", title = "My effective permissions")
+    /** Also answers a plugin acting for the person (DELEGATED): it learns only that person's own
+     *  keys and checker flag — how the KYC plugin shows decision controls without reading core tables. */
+    @FspOperation(id = "rbac.permission.me", component = "rbac", title = "My effective permissions",
+        actors = {Actor.ActorType.PERSON, Actor.ActorType.DELEGATED})
     @GetMapping("/v1/me/permissions")
     public Map<String, Object> myPermissions(jakarta.servlet.http.HttpServletRequest request) {
         Actor actor = actor(request);
@@ -40,6 +46,23 @@ public class RbacController {
             "tenantId", actor.activeTenantId().toString(),
             "permissions", keys.stream().sorted().toList(),
             "checker", checker);
+    }
+
+    /**
+     * The submenus of {@code portal}'s published menu the caller may see (ACTIVE) and the actions
+     * they hold there — the Permissions Matrix cells of their roles ({@code full} = every cell).
+     * The portal's sidebar draws only what this allows; core still checks every API call.
+     */
+    @FspOperation(id = "rbac.menu.me", component = "rbac", title = "My menu access on a portal")
+    @GetMapping("/v1/me/menu-access")
+    public Map<String, Object> myMenuAccess(jakarta.servlet.http.HttpServletRequest request,
+                                            @org.springframework.web.bind.annotation.RequestParam("portal") String portal) {
+        Actor actor = actor(request);
+        if (portal == null || !MenuAccessService.PORTALS.contains(portal)) {
+            throw ApiException.badRequest("PORTAL_UNKNOWN", "Unknown portal");
+        }
+        MenuAccessService.MenuAccess a = menuAccess.forActor(actor, actor.activeTenantId(), portal);
+        return Map.of("portal", a.portal(), "full", a.full(), "cells", List.copyOf(a.cells()));
     }
 
     private Actor actor(jakarta.servlet.http.HttpServletRequest request) {

@@ -7,9 +7,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { ApiError } from '../../../web-core/api';
 import type { WidgetDataPortLike } from '../../core/manifest';
+import { PRIMARY_CONTACTS, contactRefine, toE164 } from '../../kit/contact';
+import type { PrimaryContact } from '../../kit/contact';
 
 /* ------------------------------------------------------------------ wire */
-export type UserStatus = 'ACTIVE' | 'DISABLED' | 'ARCHIVED';
+/** PENDING = staged by a maker, awaiting a checker (USER_CREATE) — cannot sign in, holds no roles. */
+export type UserStatus = 'PENDING' | 'ACTIVE' | 'DISABLED' | 'ARCHIVED';
 
 export interface RoleRef {
   id: string;
@@ -33,7 +36,39 @@ export interface UserRow {
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;
+  /** where the IdP sends the activation; null = a legacy user born with the initial password */
+  primaryContact?: PrimaryContact | null;
+  /** set their own password from the activation (null when there is none to complete) */
+  activated?: boolean | null;
 }
+
+/** Approved, but hasn't set a password from the IdP activation yet — can't sign in. */
+export const awaitingActivation = (u: Pick<UserRow, 'status' | 'activated'>) => u.status === 'ACTIVE' && u.activated === false;
+
+/** One page of an org's users — core's UserDtos.UserPage (AGENTS §2.7 envelope). */
+export interface UserPage {
+  items: UserRow[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  hasNext: boolean;
+  sort: string;
+  /** whole-org counts per status (+ CURRENT = not removed), independent of page / search / filter */
+  counts: Record<StatusCountKey, number>;
+  /** the org this page lists — the signed-in org, or the org being acted as */
+  org: OrgRef;
+}
+
+export interface OrgRef {
+  id: string;
+  legalName: string | null;
+  type: string;
+  subType: string | null;
+  depth: number;
+}
+
+export type StatusCountKey = 'CURRENT' | 'PENDING' | 'ACTIVE' | 'DISABLED' | 'ARCHIVED';
 
 export interface RoleOption {
   id: string;
@@ -42,14 +77,6 @@ export interface RoleOption {
   scope: string;
   permissionCount: number;
   assignable: boolean;
-}
-
-export interface OrgRow {
-  id: string;
-  legalName: string;
-  depth: number;
-  type: string;
-  parentTenantId: string | null;
 }
 
 /* ------------------------------------------------------------ validation */
@@ -72,7 +99,13 @@ export const userFormSchema = z.object({
     .refine((v) => v === '' || /^\+?[0-9][0-9 ()-]{5,19}$/.test(v), 'Enter a valid phone number, e.g. +264 81 123 4567'),
   roleIds: z.array(z.string()),
   checker: z.boolean(),
+  /** create only: where the IdP sends the activation (link by email / code by SMS) */
+  primaryContact: z.enum(PRIMARY_CONTACTS),
 });
+
+/** Adding a user: the primary contact is required and the phone must be international (E.164)
+ *  — the IdP texts the activation code to it. Mirrors core PersonProvisioning.contact. */
+export const userCreateSchema = userFormSchema.superRefine((v, ctx) => contactRefine(v, ctx));
 
 export type UserFormValues = z.infer<typeof userFormSchema>;
 export type UserFormField = keyof UserFormValues;
@@ -84,6 +117,7 @@ export const FIELD_FOR_CODE: Record<string, UserFormField> = {
   FULL_NAME_INVALID: 'fullName',
   EMAIL_INVALID: 'email',
   PHONE_INVALID: 'phone',
+  CONTACT_REQUIRED: 'email',
   ROLE_UNKNOWN: 'roleIds',
   ROLE_NOT_ASSIGNABLE: 'roleIds',
   SELF_ROLE_CHANGE: 'roleIds',
@@ -109,17 +143,57 @@ export function toProblem(err: unknown): Problem {
 export const userKeys = {
   all: ['users'] as const,
   org: (orgId: string) => ['users', 'org', orgId] as const,
-  list: (orgId: string) => ['users', 'org', orgId, 'list'] as const,
+  lists: (orgId: string) => ['users', 'org', orgId, 'list'] as const,
+  list: (orgId: string, q: UserListQuery) => ['users', 'org', orgId, 'list', q] as const,
+  user: (orgId: string, id: string) => ['users', 'org', orgId, 'user', id] as const,
   roles: (orgId: string) => ['users', 'org', orgId, 'roles'] as const,
-  orgs: (rootOrgId: string) => ['users', 'orgs', rootOrgId] as const,
 };
 
 /* ------------------------------------------------------------------ reads */
-export function useUserList(port: WidgetDataPortLike, orgId: string) {
+/** What the list asks core for. Search, filter, sort and paging all run server-side (AGENTS §2.7). */
+export interface UserListQuery {
+  page: number;
+  size: number;
+  q: string;
+  status: StatusFilter;
+  sort: SortId;
+}
+
+export const PAGE_SIZES = [20, 50, 100] as const;
+export const DEFAULT_PAGE_SIZE = 20;
+
+/** `users.list` params; the source's allow-list decides what reaches the URL, blanks are dropped. */
+export function listParams(orgId: string, q: UserListQuery): Record<string, string> {
+  const out: Record<string, string> = {
+    tenantId: orgId, page: String(q.page), size: String(q.size), status: q.status, sort: q.sort,
+  };
+  const text = q.q.trim();
+  if (text) out.q = text;
+  return out;
+}
+
+export function useUserList(port: WidgetDataPortLike, orgId: string, q: UserListQuery) {
   return useQuery({
-    queryKey: userKeys.list(orgId),
-    queryFn: () => port.request<UserRow[]>('users.list', { tenantId: orgId }),
-    placeholderData: (prev) => prev,
+    queryKey: userKeys.list(orgId, q),
+    queryFn: () => port.request<UserPage>('users.list', listParams(orgId, q)),
+    // no org yet (a "selected org" screen before the pick) → no request to /tenants//users
+    enabled: Boolean(orgId),
+    // keep the previous page while paging the SAME org; never show one org's users under another
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[2] === orgId ? prev : undefined),
+  });
+}
+
+/**
+ * The open user, by id — they may not be on the page being shown (an Approvals deep link,
+ * a search that no longer matches). Seeded from the page row when it is there.
+ */
+export function useUser(port: WidgetDataPortLike, orgId: string, id: string | null, row: UserRow | undefined) {
+  return useQuery({
+    queryKey: userKeys.user(orgId, id ?? ''),
+    queryFn: () => port.request<UserRow>('users.get', { tenantId: orgId, personId: id ?? '' }),
+    enabled: Boolean(id) && id !== 'new',
+    initialData: row,
+    retry: false,
   });
 }
 
@@ -132,42 +206,29 @@ export function useRoleOptions(port: WidgetDataPortLike, orgId: string, enabled:
   });
 }
 
-/**
- * The organizations this actor can administer: own org + up to two levels below
- * (Phase-0 hierarchy depth). Branches the actor cannot read are silently skipped.
- */
-export function useOrgOptions(port: WidgetDataPortLike, rootOrgId: string) {
-  return useQuery({
-    queryKey: userKeys.orgs(rootOrgId),
-    staleTime: 5 * 60_000,
-    queryFn: async (): Promise<OrgRow[]> => {
-      const root = await port.request<OrgRow>('users.org', { tenantId: rootOrgId });
-      const children = await port
-        .request<OrgRow[]>('users.org.children', { tenantId: rootOrgId })
-        .catch(() => [] as OrgRow[]);
-      const grand = await Promise.all(
-        children.map((c) =>
-          port.request<OrgRow[]>('users.org.children', { tenantId: c.id }).catch(() => [] as OrgRow[]),
-        ),
-      );
-      const out: OrgRow[] = [root];
-      children.forEach((c, i) => {
-        out.push(c, ...(grand[i] ?? []));
-      });
-      return out;
-    },
-  });
-}
-
 /* ----------------------------------------------------------------- writes */
 export type UserCommand =
   | { kind: 'create'; values: UserFormValues }
   | { kind: 'update'; user: UserRow; values: UserFormValues; rolesEditable: boolean }
   | { kind: 'deactivate'; user: UserRow }
   | { kind: 'activate'; user: UserRow }
-  | { kind: 'remove'; user: UserRow };
+  | { kind: 'remove'; user: UserRow }
+  | { kind: 'resend'; user: UserRow };
 
 const blankToEmpty = (v: string) => v.trim();
+
+/** POST body of user.create — contact + channel for the IdP activation; never a password. */
+export function createUserBody(v: UserFormValues) {
+  return {
+    username: v.username,
+    fullName: v.fullName,
+    email: blankToEmpty(v.email).toLowerCase(),
+    phone: toE164(v.phone.trim()) ?? blankToEmpty(v.phone),
+    roleIds: v.roleIds,
+    checker: v.checker,
+    primaryContact: v.primaryContact,
+  };
+}
 
 /**
  * Every user command, never optimistic, never auto-retried; on settle the org's
@@ -180,18 +241,7 @@ export function useUserCommand(port: WidgetDataPortLike, orgId: string) {
       const base = { tenantId: orgId };
       switch (cmd.kind) {
         case 'create':
-          return port.command<UserRow>(
-            'user.create',
-            {
-              username: cmd.values.username,
-              fullName: cmd.values.fullName,
-              email: blankToEmpty(cmd.values.email),
-              phone: blankToEmpty(cmd.values.phone),
-              roleIds: cmd.values.roleIds,
-              checker: cmd.values.checker,
-            },
-            base,
-          );
+          return port.command<UserRow>('user.create', createUserBody(cmd.values), base);
         case 'update':
           return port.command<UserRow>(
             'user.update',
@@ -209,6 +259,9 @@ export function useUserCommand(port: WidgetDataPortLike, orgId: string) {
           return port.command<UserRow>('user.deactivate', { expectedVersion: cmd.user.version }, { ...base, personId: cmd.user.id });
         case 'activate':
           return port.command<UserRow>('user.activate', { expectedVersion: cmd.user.version }, { ...base, personId: cmd.user.id });
+        case 'resend':
+          // acknowledgement only ({personId, channel}) — the list re-sync shows nothing new
+          return port.command<UserRow>('user.activation.resend', {}, { ...base, personId: cmd.user.id });
         case 'remove':
           return port.command<UserRow>('user.remove', undefined, {
             ...base,
@@ -218,19 +271,12 @@ export function useUserCommand(port: WidgetDataPortLike, orgId: string) {
       }
     },
     onSuccess: (saved) => {
-      // write-through the confirmed server row, then re-sync the list
+      // write-through the confirmed server row for the open drawer, then re-sync every page
       // (a fixture/acknowledgement response without a row only triggers the re-sync)
       if (!saved || typeof saved.id !== 'string') return;
-      qc.setQueryData<UserRow[]>(userKeys.list(orgId), (rows) => {
-        if (!rows) return rows;
-        const i = rows.findIndex((r) => r.id === saved.id);
-        if (i < 0) return [...rows, saved].sort((a, b) => a.username.localeCompare(b.username));
-        const next = rows.slice();
-        next[i] = saved;
-        return next;
-      });
+      qc.setQueryData<UserRow>(userKeys.user(orgId, saved.id), saved);
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: userKeys.list(orgId) }),
+    onSettled: () => qc.invalidateQueries({ queryKey: userKeys.org(orgId) }),
   });
 }
 
@@ -259,26 +305,25 @@ export function absoluteTime(iso: string | null | undefined): string {
   return iso ? new Date(iso).toLocaleString() : '—';
 }
 
-export type StatusFilter = 'current' | 'ACTIVE' | 'DISABLED' | 'ARCHIVED';
+export type StatusFilter = 'current' | 'PENDING' | 'ACTIVE' | 'DISABLED' | 'ARCHIVED';
 
-export const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
-  { id: 'current', label: 'All' },
-  { id: 'ACTIVE', label: 'Active' },
-  { id: 'DISABLED', label: 'Deactivated' },
-  { id: 'ARCHIVED', label: 'Removed' },
+export const STATUS_FILTERS: { id: StatusFilter; label: string; countKey: StatusCountKey }[] = [
+  { id: 'current', label: 'All', countKey: 'CURRENT' },
+  { id: 'PENDING', label: 'Awaiting approval', countKey: 'PENDING' },
+  { id: 'ACTIVE', label: 'Active', countKey: 'ACTIVE' },
+  { id: 'DISABLED', label: 'Deactivated', countKey: 'DISABLED' },
+  { id: 'ARCHIVED', label: 'Removed', countKey: 'ARCHIVED' },
 ];
 
-export function matchesFilter(u: UserRow, f: StatusFilter): boolean {
-  return f === 'current' ? u.status !== 'ARCHIVED' : u.status === f;
-}
+/** Sort choices — each is on core's safelist (UserAdminService.SORT_FIELDS). */
+export const SORT_OPTIONS = [
+  { id: 'username,asc', label: 'Username A–Z' },
+  { id: 'fullName,asc', label: 'Name A–Z' },
+  { id: 'fullName,desc', label: 'Name Z–A' },
+  { id: 'updatedAt,desc', label: 'Recently updated' },
+  { id: 'createdAt,desc', label: 'Newest first' },
+  { id: 'createdAt,asc', label: 'Oldest first' },
+] as const;
 
-export function matchesQuery(u: UserRow, q: string): boolean {
-  if (!q) return true;
-  const n = q.toLowerCase();
-  return (
-    u.username.includes(n) ||
-    u.fullName.toLowerCase().includes(n) ||
-    (u.email ?? '').includes(n) ||
-    u.roles.some((r) => r.name.toLowerCase().includes(n))
-  );
-}
+export type SortId = (typeof SORT_OPTIONS)[number]['id'];
+export const DEFAULT_SORT: SortId = 'username,asc';

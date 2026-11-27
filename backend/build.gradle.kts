@@ -16,8 +16,15 @@ allprojects {
 
 subprojects {
     apply(plugin = "java")
-    apply(plugin = "org.springframework.boot")
-    apply(plugin = "io.spring.dependency-management")
+    // Aggregator/container projects (e.g. ':plugins' — the parent of 'plugins:kyc',
+    // implicitly registered by settings.gradle.kts) have no sources and must NOT get the
+    // Spring Boot plugin: its bootJar task would fail with "mainClass could not be resolved",
+    // breaking a plain ./gradlew build on the root project (seen 2026-11-19).
+    val isSourceProject = projectDir.resolve("src/main/java").isDirectory
+    if (isSourceProject) {
+        apply(plugin = "org.springframework.boot")
+        apply(plugin = "io.spring.dependency-management")
+    }
 
     java {
         toolchain {

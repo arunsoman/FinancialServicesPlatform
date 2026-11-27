@@ -10,6 +10,7 @@ export function WorkbenchShell() {
   const groups = groupByCategory(WIDGETS);
   return (
     <div className="wb">
+      <a className="skip" href="#wb-main">Skip to content</a>
       <aside className="side">
         <div className="brand">
           FSP <b>widget workbench</b>
@@ -29,10 +30,11 @@ export function WorkbenchShell() {
           New widget: <b>New widget (LLM)</b> with an LLM, or by hand in{' '}
           <span className="mono">shared/widgets/&lt;area&gt;/&lt;name&gt;/</span> (index.tsx + widget.tsx + data.ts).
           <br />
-          Portal theme is dark only.
+          Theme: the toggle in the bar above (light · dark · follows the OS) — the same
+          <code>data-theme</code> on &lt;html&gt; the portals render from.
         </p>
       </aside>
-      <main className="main">
+      <main className="main" id="wb-main" tabIndex={-1}>
         <ConnectionBar />
         <Outlet />
       </main>

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Alert, Button } from '../../../ui/atoms';
 import { FormField } from '../../kit/FormField';
+import { ContactFields } from '../../kit/ContactFields';
 import { RolePicker } from './RolePicker';
-import { FIELD_FOR_CODE, userFormSchema } from './model';
+import { FIELD_FOR_CODE, userCreateSchema, userFormSchema } from './model';
 import type { Problem, RoleOption, UserFormField, UserFormValues, UserRow } from './model';
 
 export interface UserFormProps {
@@ -31,6 +32,7 @@ function initialValues(user?: UserRow): UserFormValues {
     phone: user?.phone ?? '',
     roleIds: user?.roles.map((r) => r.id) ?? [],
     checker: user?.checker ?? false,
+    primaryContact: user?.primaryContact ?? 'EMAIL',
   };
 }
 
@@ -67,7 +69,7 @@ export function UserForm({
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const candidate = mode === 'edit' ? { ...values, username: user?.username ?? values.username } : values;
-    const r = userFormSchema.safeParse(candidate);
+    const r = (mode === 'create' ? userCreateSchema : userFormSchema).safeParse(candidate);
     if (!r.success) {
       const next: Errors = {};
       for (const issue of r.error.issues) {
@@ -121,6 +123,22 @@ export function UserForm({
           <FormField label="Username" value={`@${user?.username ?? ''}`} disabled hint="Usernames can’t be changed." />
         )}
 
+        {mode === 'create' ? (
+          <ContactFields
+            path=""
+            value={values}
+            onChange={(patch) => {
+              for (const [k, v] of Object.entries(patch)) set(k as UserFormField, v as never);
+            }}
+            err={(k) => errors[k as UserFormField]}
+            touch={(k) => {
+              const r = userCreateSchema.safeParse(values);
+              const issue = r.success ? undefined : r.error.issues.find((i) => i.path[0] === k);
+              setErrors((e) => ({ ...e, [k]: issue?.message }));
+            }}
+            disabled={busy}
+          />
+        ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField
             label="Email"
@@ -144,6 +162,7 @@ export function UserForm({
             onBlur={() => validateField('phone')}
           />
         </div>
+        )}
 
         <RolePicker
           options={roles}
@@ -173,9 +192,12 @@ export function UserForm({
         </label>
 
         {mode === 'create' && (
-          <p className="text-dim rounded-xl border border-dashed border-line p-3 text-[12px] leading-relaxed">
-            The new user signs in with this environment’s initial password. Share it with them through a secure channel.
-          </p>
+          <Alert kind="info">
+            <strong className="block">No password is set here.</strong>
+            Once a checker approves this user, the Identity Provider sends a one-time{' '}
+            {values.primaryContact === 'PHONE' ? 'code by SMS' : 'link by email'} and they choose their own password. They
+            can’t sign in until they have.
+          </Alert>
         )}
       </div>
 

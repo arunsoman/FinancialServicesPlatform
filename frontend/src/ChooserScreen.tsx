@@ -4,6 +4,7 @@ const PORTALS = [
   { path: '/manufacturer/', label: 'Manufacturer', accent: '#f0a35e', who: 'subType MANUFACTURER tenants' },
   { path: '/distributor/', label: 'Distributor', accent: '#a78bfa', who: 'subType DISTRIBUTOR tenants' },
   { path: '/wholesaler/', label: 'Wholesaler', accent: '#7cecff', who: 'subType WHOLESALER tenants' },
+  { path: '/merchant/', label: 'Merchant', accent: '#f2c94c', who: 'subType MERCHANT tenants' },
 ]
 
 export function ChooserScreen() {

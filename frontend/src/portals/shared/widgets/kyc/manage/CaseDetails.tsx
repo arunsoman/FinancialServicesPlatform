@@ -13,7 +13,7 @@ export const TABS = [
   { id: 'company', label: 'Company' },
   { id: 'business', label: 'Business' },
   { id: 'addresses', label: 'Addresses' },
-  { id: 'owners', label: 'Owners' },
+  { id: 'owners', label: 'UBO' },
   { id: 'bank', label: 'Bank accounts' },
   { id: 'screening', label: 'Screening' },
   { id: 'history', label: 'History' },
@@ -130,7 +130,7 @@ export function CaseDetails({
         <div className="flex flex-wrap items-center gap-1.5">
           <CaseStatusChip status={view.status} stalled={isStalled(view)} />
           <RiskChip risk={view.riskRating} />
-          <Chip>{view.subType.charAt(0) + view.subType.slice(1).toLowerCase()}</Chip>
+          <Chip>{view.subType ? view.subType.charAt(0) + view.subType.slice(1).toLowerCase() : 'Customer'}</Chip>
         </div>
 
         {problem && problem.code !== 'MAKER_CANNOT_APPROVE' && (

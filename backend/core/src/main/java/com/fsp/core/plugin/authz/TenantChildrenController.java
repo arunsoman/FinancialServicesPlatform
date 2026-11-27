@@ -28,10 +28,13 @@ public class TenantChildrenController {
 
     private final TenantChildrenService service;
     private final com.fsp.core.rbac.PermissionService permissions;
+    private final com.fsp.core.identity.IdpInternalClient idp;
 
-    public TenantChildrenController(TenantChildrenService service, com.fsp.core.rbac.PermissionService permissions) {
+    public TenantChildrenController(TenantChildrenService service, com.fsp.core.rbac.PermissionService permissions,
+                                    com.fsp.core.identity.IdpInternalClient idp) {
         this.service = service;
         this.permissions = permissions;
+        this.idp = idp;
     }
 
     @FspOperation(id = "tenant.child.create", component = "tenant", permission = "org.create",
@@ -39,7 +42,7 @@ public class TenantChildrenController {
         title = "Create child tenant (onboarding saga step 4, delegated)",
         actors = {Actor.ActorType.DELEGATED, Actor.ActorType.PERSON})
     @PostMapping("/v1/tenants/{parentId}/children")
-    public Tenant createChild(@PathVariable("parentId") UUID parentId,
+    public Map<String, Object> createChild(@PathVariable("parentId") UUID parentId,
                               @RequestBody Map<String, Object> body,
                               HttpServletRequest request) {
         Actor actor = actor(request);
@@ -62,7 +65,38 @@ public class TenantChildrenController {
             throw ApiException.badRequest("TENANT_FIELDS", "adminUsername is required");
         }
 
-        return service.createChild(parentId, legalName, subType, adminUsername, adminFullName, actor);
+        var created = service.createChild(parentId, legalName, subType, adminUsername, adminFullName,
+            invitee(body.get("admin")), invitee(body.get("checker")), actor);
+        // V36: the tx committed — now (never inside it) ask the IdP to send each activation.
+        // A delivery failure does not undo the org: the maker re-sends from the case.
+        for (UUID personId : created.invitedPersonIds()) {
+            try {
+                idp.triggerActivation(personId);
+            } catch (RuntimeException e) {
+                log.warn("tenant_child_activation_send_failed tenantId={} personId={} reason={}",
+                    created.tenant().id, personId, e.getClass().getSimpleName());
+            }
+        }
+        Tenant t = created.tenant();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("id", t.id);
+        out.put("parentTenantId", t.parentTenantId);
+        out.put("legalName", t.legalName);
+        out.put("type", t.type);
+        out.put("subType", t.subType);
+        out.put("status", t.status);
+        out.put("verificationStatus", t.verificationStatus);
+        // V36: [admin, checker] — the plugin re-sends their activation by these ids
+        out.put("invitedPersonIds", created.invitedPersonIds());
+        return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static TenantChildrenService.Invitee invitee(Object raw) {
+        if (!(raw instanceof Map<?, ?> m)) return null;
+        Map<String, Object> v = (Map<String, Object>) m;
+        return new TenantChildrenService.Invitee(asString(v.get("fullName")), asString(v.get("email")),
+            asString(v.get("phone")), asString(v.get("primaryContact")));
     }
 
     private static Actor actor(HttpServletRequest request) {

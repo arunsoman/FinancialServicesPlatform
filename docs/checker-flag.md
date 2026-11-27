@@ -33,6 +33,13 @@ checker permission as an `ON_BEHALF` grant (`PermissionService.requireClient`).
 | all (system seed) | `admin-checker` | ✅ |
 | all (system seed) | `platform-admin` | ❌ (maker; platform four-eyes always runs admin → admin-checker) |
 | `client-demo` only | `psp-ops`, `merchant-checker` | ✅ |
+| every new organization | the checker it is **born with** — the PSP checker (`TenantService.createPsp`) and the KYC saga's `checker-<admin>` (`TenantChildrenService`) | ✅ (`PersonProvisioning.designateChecker`) |
+| every new organization | its admin (the maker) | ❌ |
+
+Organizations created before V19 are back-filled by `V19__roles_governance.sql`: an
+ACTIVE person holding their org's `TENANT_CHECKER` role who was **not** created through the
+four-eyes user-admin flow (no `USER_CREATE` request targets them) is flagged. A user an
+admin deliberately created with `checker: false` is never flipped.
 
 ## Setting the flag
 

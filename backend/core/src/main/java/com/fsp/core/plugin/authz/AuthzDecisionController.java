@@ -45,9 +45,12 @@ public class AuthzDecisionController {
             throw ApiException.badRequest("AUTHZ_INVALID", "tenantId is required");
         }
 
+        // act-as (plans/act-as-tenant-plan.md): the gateway passes the session it resolved; core
+        // re-verifies it and decides the person AS the acted-as tenant (ceiling-capped)
+        String actSessionId = asString(body.get("actSessionId"));
         AuthzDecisionService.Decision decision = service.decide(
             actor.personId(), actor.username(), actor.activeTenantId(),
-            permission, targetTenantId, operationId);
+            permission, targetTenantId, operationId, actSessionId);
 
         return Map.of(
             "allow", decision.allow(),

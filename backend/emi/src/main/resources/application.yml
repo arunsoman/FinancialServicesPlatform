@@ -1,0 +1,45 @@
+server:
+  port: ${SERVER_PORT:8086}
+
+spring:
+  application:
+    name: fsp-emi
+  datasource:
+    url: ${FSP_EMI_DB_URL:jdbc:postgresql://localhost:5432/fsp_emi}
+    username: ${FSP_EMI_DB_USER:fsp_emi}
+    password: ${FSP_EMI_DB_PASSWORD:fsp_emi}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration
+
+fsp:
+  emi:
+    # PSD-3 §9.1.1: regulated e-money balances are NAD-only, redeemable at par.
+    wallet-currency: ${FSP_EMI_WALLET_CURRENCY:NAD}
+    # The one disposition knob (plan §5.3): every saga deadline derives from this.
+    saga-grace-seconds: ${FSP_EMI_SAGA_GRACE_SECONDS:3024000}  # 35 d default
+    # Zero-trust hop: only requests carrying this credential (gateway re-issues it) are trusted.
+    internal-credential: ${FSP_INTERNAL_CREDENTIAL_EMI:}
+    # TTL disposition sweeper cadence (Stage 3): expired HOLDs auto-void, expired SUBMITTED
+    # sagas park in PENDING_RECOGNITION, VOID_UNKNOWN rows retry, PR sagas self-probe.
+    saga:
+      sweep-interval-ms: ${FSP_EMI_SAGA_SWEEP_INTERVAL_MS:60000}
+      sweep-initial-delay-ms: ${FSP_EMI_SAGA_SWEEP_INITIAL_DELAY_MS:30000}
+    # BILLER_REST adapter tuning (Stage 3): RailGuard capability + HTTP timeouts.
+    biller:
+      parallelism: ${FSP_EMI_BILLER_PARALLELISM:4}
+      timeout-ms: ${FSP_EMI_BILLER_TIMEOUT_MS:5000}
+    tigerbeetle:
+      addresses: ${FSP_TB_ADDRESSES:127.0.0.1:3000}
+      cluster-id: ${FSP_EMI_TB_CLUSTER_ID:0}
+      # EMI book (TigerBeetle ledger id) — wallets and their float mirror live here.
+      book-id: ${FSP_EMI_TB_BOOK_ID:806}
+    outbox:
+      sweep-interval: ${FSP_EMI_OUTBOX_SWEEP_MS:500}
+
+logging:
+  pattern:
+    console: "ts=%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX,UTC} level=%p traceId=%X{traceId} tenantId=%X{tenantId} userId=%X{userId} logger=%c{1} msg=%m ex=%replace(%ex){'\n',' | '}%n"

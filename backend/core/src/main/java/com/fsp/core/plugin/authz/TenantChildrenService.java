@@ -5,6 +5,7 @@ import com.fsp.core.common.ApiException;
 import com.fsp.core.identity.PersonProvisioning;
 import com.fsp.core.outbox.OutboxService;
 import com.fsp.core.rbac.Role;
+import com.fsp.core.rbac.RoleTemplates;
 import com.fsp.core.tenant.Tenant;
 import com.fsp.core.tenant.TenantRepository;
 import com.fsp.core.audit.AuditService;
@@ -25,35 +26,37 @@ import java.util.UUID;
 @Service
 public class TenantChildrenService {
 
-    // Maker-side permissions for the new tenant
-    private static final List<String> TENANT_ADMIN_PERMS = List.of(
-        "kyc.review", "kyc.approve", "je.create", "je.view", "gl.account.create",
-        "gl.account.view", "bank.account.create", "period.open", "audit.view");
-    private static final List<String> TENANT_CHECKER_PERMS = List.of(
-        "kyc.approve", "kyc.reject", "kyc.review", "org.activate", "je.approve", "je.view",
-        "gl.account.approve", "gl.account.view", "bank.account.approve", "audit.view");
-
     private final TenantRepository tenantRepository;
     private final PersonProvisioning provisioning;
     private final AuditService audit;
     private final OutboxService outbox;
-    private final com.fsp.core.config.FspProperties props;
+    private final com.fsp.core.config.FspProperties props; // kept for wiring compatibility
+    private final com.fsp.core.ledger.LedgerService ledger;
 
     public TenantChildrenService(TenantRepository tenantRepository, PersonProvisioning provisioning,
                                  AuditService audit, OutboxService outbox,
-                                 com.fsp.core.config.FspProperties props) {
+                                 com.fsp.core.config.FspProperties props,
+                                 com.fsp.core.ledger.LedgerService ledger) {
         this.tenantRepository = tenantRepository;
         this.provisioning = provisioning;
         this.audit = audit;
         this.outbox = outbox;
         this.props = props;
+        this.ledger = ledger;
     }
 
+    /** V36: who an org-born person is and where their activation goes (primary contact). */
+    public record Invitee(String fullName, String email, String phone, String primaryContact) {}
+
+    /** The created org plus the persons whose activation must be sent once this tx commits. */
+    public record ChildCreated(Tenant tenant, List<UUID> invitedPersonIds) {}
+
     @Transactional
-    public Tenant createChild(UUID parentTenantId, String legalName, String subType,
-                              String adminUsername, String adminFullName, Actor actor) {
-        // Actor must be DELEGATED (person acting through plugin) or PERSON
-        if (actor.type() != Actor.ActorType.DELEGATED && actor.type() != Actor.ActorType.PERSON) {
+    public ChildCreated createChild(UUID parentTenantId, String legalName, String subType,
+                              String adminUsername, String adminFullName,
+                              Invitee admin, Invitee checker, Actor actor) {
+        // Actor must be DELEGATED (person acting through plugin), PERSON, or ACTING (act-as)
+        if (actor.type() != Actor.ActorType.DELEGATED && !actor.isHumanPlane()) {
             throw ApiException.forbidden("ACTOR_TYPE_REJECTED",
                 "Only person or delegated actors can create child tenants");
         }
@@ -71,14 +74,38 @@ public class TenantChildrenService {
             throw ApiException.badRequest("TENANT_FIELDS", "legalName is required");
         }
 
-        String st = (subType == null ? "MERCHANT" : subType).toUpperCase();
+        // the ladder (TenantLadder): an org onboards only the next level down; the default is that level
+        String allowed = com.fsp.core.tenant.TenantLadder.childSubTypeOf(parent);
+        if (allowed == null) {
+            log.warn("tenant_child_refused_leaf parentId={} parentSubType={} maker={}",
+                parent.id, parent.subType, actor.personId());
+            throw ApiException.conflict("CHILD_NOT_ALLOWED",
+                "%s organizations can't onboard organizations below them".formatted(
+                    parent.subType == null ? "These" : parent.subType.charAt(0) + parent.subType.substring(1).toLowerCase()));
+        }
+        String st = subType == null || subType.isBlank() ? allowed : subType.trim().toUpperCase();
+        if (!allowed.equals(st)) {
+            log.warn("tenant_child_refused_rung parentId={} asked={} allowed={} maker={}",
+                parent.id, st, allowed, actor.personId());
+            throw ApiException.badRequest("CHILD_SUBTYPE_NOT_ALLOWED",
+                "Below this organization you can only onboard a " + allowed.toLowerCase());
+        }
+
+        // V36: org persons activate through a one-time link/code on their primary contact —
+        // never the shared bootstrap password. Both contacts are validated before anything persists.
+        if (admin == null || checker == null) {
+            throw ApiException.badRequest("CONTACT_REQUIRED",
+                "Administrator and checker contacts are required (their activation goes there)");
+        }
+        PersonProvisioning.contact(admin.email(), admin.phone(), admin.primaryContact());
+        PersonProvisioning.contact(checker.email(), checker.phone(), checker.primaryContact());
 
         Tenant child = new Tenant();
         child.id = UUID.randomUUID();
         child.parentTenantId = parent.id;
         child.depth = parent.depth + 1;
         child.hierarchyPath = parent.hierarchyPath + "/" + child.id;
-        child.type = "TENANT";
+        child.type = "PLATFORM".equals(parent.type) ? "PSP" : "TENANT";
         child.subType = st;
         child.status = "PENDING";
         child.verificationStatus = "PENDING";
@@ -87,21 +114,27 @@ public class TenantChildrenService {
         tenantRepository.save(child);
 
         // Provision applicant admin + checker roles
-        Role adminRole = provisioning.ensureRole(child.id, "TENANT_ADMIN", "Tenant Admin", "TENANT", TENANT_ADMIN_PERMS);
-        Role checkerRole = provisioning.ensureRole(child.id, "TENANT_CHECKER", "Tenant Checker", "TENANT", TENANT_CHECKER_PERMS);
+        // templates by sub-type: a leaf (MERCHANT) admin never onboards children (RoleTemplates)
+        Role adminRole = provisioning.ensureRole(child.id, RoleTemplates.ADMIN_ROLE, "Tenant Admin", "TENANT",
+            RoleTemplates.adminKeys(st));
+        Role checkerRole = provisioning.ensureRole(child.id, RoleTemplates.CHECKER_ROLE, "Tenant Checker", "TENANT",
+            RoleTemplates.checkerKeys(st, true));
 
-        // credentials belong to the IdP; the bootstrap password comes from config (FSP_PERSON_PASSWORD)
-        String defaultPassword = props.getSecurity().getDefaultPersonPassword();
-        var adminPerson = provisioning.createPerson(
-            child.id, adminUsername, adminFullName != null ? adminFullName : adminUsername, null, defaultPassword, true);
-        var checkerPerson = provisioning.createPerson(
-            child.id, "checker-" + adminUsername, "Checker for " + adminUsername, null, defaultPassword, true);
+        // credentials belong to the IdP: each person sets their own via the activation (V36)
+        String adminName = admin.fullName() != null && !admin.fullName().isBlank() ? admin.fullName()
+            : adminFullName != null ? adminFullName : adminUsername;
+        String checkerName = checker.fullName() != null && !checker.fullName().isBlank() ? checker.fullName()
+            : "Checker for " + adminUsername;
+        var adminPerson = provisioning.createInvitedPerson(child.id, adminUsername, adminName,
+            admin.email(), admin.phone(), admin.primaryContact(), "ACTIVE", true, false);
+        var checkerPerson = provisioning.createInvitedPerson(child.id, "checker-" + adminUsername, checkerName,
+            checker.email(), checker.phone(), checker.primaryContact(), "ACTIVE", true, false);
         provisioning.assignRole(adminPerson.id, adminRole.id);
         provisioning.assignRole(checkerPerson.id, checkerRole.id);
+        provisioning.designateChecker(checkerPerson);
 
-        // Suspended books will be activated by verification (§7.3) after KYC verdict
-        // Note: book creation is handled by KycOnboardingService in the full flow;
-        // here we create the tenant skeleton for the saga.
+        // Born with a SUSPENDED operating book (Phase-0: NAD); verification opens it (docs §7.3).
+        ledger.createBook(child.id, legalName + " Operating Book", "NAD");
 
         audit.record(actor.personId(), null, child.id, null,
             "TENANT_CHILD_CREATED", "TENANT", child.id.toString(),
@@ -112,6 +145,6 @@ public class TenantChildrenService {
 
         log.info("tenant_child_created tenantId={} parentId={} maker={} subType={}",
             child.id, parentTenantId, actor.personId(), st);
-        return child;
+        return new ChildCreated(child, List.of(adminPerson.id, checkerPerson.id));
     }
 }

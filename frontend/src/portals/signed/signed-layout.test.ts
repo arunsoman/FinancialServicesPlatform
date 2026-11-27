@@ -6,9 +6,12 @@ import { describe, expect, it } from 'vitest';
 import type { WidgetDef } from '../shared/widgets/core/manifest';
 import { span } from '../shared/widgets/core/grid';
 import {
-  firstVisibleLink, layoutNavEntries, placedDef, screenVisible, signedLayoutSchema, signedSpan,
+  NO_MENU_ACCESS, firstVisibleLink, holdsCell, layoutNavEntries, menuCell, placedDef, screenVisible, signedLayoutSchema, signedSpan,
 } from './signed-layout';
-import type { SignedLayout } from './signed-layout';
+import type { MenuAccess, SignedLayout } from './signed-layout';
+import { parseMenuAccess } from './menu-access';
+
+const FULL: MenuAccess = { full: true, cells: new Set() };
 
 const def = (id: string, version: string, requires: string[]): WidgetDef => ({
   id, version, label: id, contexts: ['ANY'], requires,
@@ -61,14 +64,39 @@ describe('signed layout renderer rules', () => {
 
   it('shows only screens and menus the user may see, and picks the first as home', () => {
     const l = layout();
-    expect(screenVisible(l, l.menus[0].screens[0], ['user.manage'], reg)).toBe(false);
-    const nav = layoutNavEntries(l, ['user.manage'], reg);
+    expect(screenVisible(l, l.menus[0], l.menus[0].screens[0], ['user.manage'], reg, FULL)).toBe(false);
+    const nav = layoutNavEntries(l, ['user.manage'], reg, FULL);
     expect(nav).toEqual([
       { kind: 'group', label: 'Access' },
       { kind: 'item', label: 'Users', icon: '▸', link: '/p/access/users' },
     ]);
-    expect(firstVisibleLink(l, ['user.manage'], reg)).toBe('/p/access/users');
-    expect(firstVisibleLink(l, [], reg)).toBeNull();
+    expect(firstVisibleLink(l, ['user.manage'], reg, FULL)).toBe('/p/access/users');
+    expect(firstVisibleLink(l, [], reg, FULL)).toBeNull();
+  });
+
+  it('shows a submenu only with its ACTIVE cell — even when its widgets would render', () => {
+    const l = layout();
+    const perms = ['user.manage', 'kyc.review'];
+    // no cells → nothing (fail closed), whatever the permission keys say
+    expect(layoutNavEntries(l, perms, reg, NO_MENU_ACCESS)).toEqual([]);
+    expect(firstVisibleLink(l, perms, reg, NO_MENU_ACCESS)).toBeNull();
+    // VIEW alone does not show it; ACTIVE does
+    const viewOnly: MenuAccess = { full: false, cells: new Set([menuCell('access', 'users', 'VIEW')]) };
+    expect(screenVisible(l, l.menus[1], l.menus[1].screens[0], perms, reg, viewOnly)).toBe(false);
+    const active: MenuAccess = { full: false, cells: new Set([menuCell('access', 'users', 'ACTIVE')]) };
+    expect(layoutNavEntries(l, perms, reg, active)).toEqual([
+      { kind: 'group', label: 'Access' },
+      { kind: 'item', label: 'Users', icon: '▸', link: '/p/access/users' },
+    ]);
+    expect(holdsCell(active, 'kyc', 'orgs', 'ACTIVE')).toBe(false);
+    expect(holdsCell(FULL, 'kyc', 'orgs', 'DELETE')).toBe(true);
+  });
+
+  it('reads menu access strictly — a wrong portal or a malformed cell is refused, never "everything"', () => {
+    expect(parseMenuAccess('admin', { portal: 'admin', full: false, cells: ['access/users:ACTIVE'] }).cells.has('access/users:ACTIVE')).toBe(true);
+    expect(() => parseMenuAccess('admin', { portal: 'merchant', full: true, cells: [] })).toThrow();
+    expect(() => parseMenuAccess('admin', { portal: 'admin', full: false, cells: ['access/users:EXECUTE'] })).toThrow();
+    expect(() => parseMenuAccess('admin', { portal: 'admin', cells: [] })).toThrow();
   });
 
   it('uses the signed span per tier, clamped to the manifest bounds', () => {

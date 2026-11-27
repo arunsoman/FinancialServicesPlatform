@@ -34,7 +34,7 @@ function GuardedScreen({ portalId, item }: { portalId: PortalId; item: MenuItem 
   if (!eligible) return <Navigate to="/no-access" replace />;
   if (!can(permissions, permsForRoute(portalId, item.link))) return <Navigate to="/no-access" replace />;
   const Screen = SCREENS[item.link] ?? SCREENS['*'];
-  return <Screen portalId={portalId} link={item.link} widgets={item.widgets} label={item.label} />;
+  return <Screen portalId={portalId} link={item.link} widgets={item.widgets} label={item.label} config={item.config} span={item.span} />;
 }
 
 /* --------------------------------------------------------------- login route */
@@ -73,14 +73,14 @@ function Router({ portal, portalId }: { portal: PortalConfig; portalId: PortalId
       {
         path: '',
         element: (
-          <SignedMenuGate portal={portal.deliveryKey} required={portal.signedDelivery}>
-            <AppShell portal={portal} portalId={portalId}>
+          <SignedMenuGate portal={portal.deliveryKey} label={portal.label}>
+            <AppShell portal={portal}>
               <Outlet />
             </AppShell>
           </SignedMenuGate>
         ),
         children: [
-          // home: first published screen the user can see, else the coded overview
+          // home: first published screen the user can see
           { index: true, element: <HomeRedirect /> },
           // screens of the published, signature-verified layout (SME p/:menu/:screen)
           { path: 'p/:menuId/:screenId', element: <LayoutScreen /> },

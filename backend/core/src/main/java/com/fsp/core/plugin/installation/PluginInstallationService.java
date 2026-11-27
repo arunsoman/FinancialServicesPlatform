@@ -115,7 +115,14 @@ public class PluginInstallationService {
         installations.save(inst);
 
         // Provision default readiness gates (plugin will flip them to ACTIVE via ready())
-        List<String> defaultGates = List.of("PERMISSIONS_SEEDED", "CLIENT_ACTIVE", "SECRETS_PROVISIONED", "DEPENDENCIES_READY");
+        // GL_ACCOUNTS_ENSURED is optional: a plugin that moves no money has no GL wiring and
+        // must not report it (KYC); money-moving plugins report it first (inventory).
+        // A plugin gets the gate only when its manifest wires ledger MACHINE grants
+        // (gl.account.* / je.post.immediate) — otherwise it could never reach ACTIVE.
+        boolean ledgerCapable = ledgerCapable(inst.pluginCode);
+        List<String> defaultGates = ledgerCapable
+            ? List.of("PERMISSIONS_SEEDED", "CLIENT_ACTIVE", "SECRETS_PROVISIONED", "DEPENDENCIES_READY", "GL_ACCOUNTS_ENSURED")
+            : List.of("PERMISSIONS_SEEDED", "CLIENT_ACTIVE", "SECRETS_PROVISIONED", "DEPENDENCIES_READY");
         for (String gate : defaultGates) {
             gates.save(new PluginInstallationGate(inst.id, gate, "PENDING"));
         }
@@ -129,6 +136,14 @@ public class PluginInstallationService {
         log.info("plugin_install_approved installationId={} plugin={} tenant={} checker={}",
             inst.id, inst.pluginCode, inst.tenantId, checker.personId());
         return inst;
+    }
+
+    /** Ledger-capable = manifest declares gl.account.* / je.post.immediate (MACHINE grants / ops). */
+    private boolean ledgerCapable(String pluginCode) {
+        return types.findByCodeAndStatus(pluginCode, "REGISTERED").stream()
+            .findFirst()
+            .map(t -> t.manifest != null && (t.manifest.contains("\"gl.account.") || t.manifest.contains("je.post.immediate")))
+            .orElse(false);
     }
 
     /** Plugin reports a readiness gate (machine actor). When all gates are ACTIVE, the

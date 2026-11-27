@@ -1,0 +1,250 @@
+{
+  "id": "org.branches",
+  "stage": "done",
+  "ops": [
+    {
+      "name": "org.branches.list",
+      "kind": "source",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/branches",
+      "status": "REUSE",
+      "opId": "org.branch.list",
+      "permission": "",
+      "risk": "READ"
+    },
+    {
+      "name": "org.branches.get",
+      "kind": "source",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/branches/{branchId}",
+      "status": "REUSE",
+      "opId": "org.branch.get",
+      "permission": "role.view",
+      "risk": "READ"
+    },
+    {
+      "name": "org.branches.create",
+      "kind": "command",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/branches",
+      "status": "REUSE",
+      "opId": "org.branch.create",
+      "permission": "role.manage",
+      "risk": "FOUR_EYES"
+    },
+    {
+      "name": "org.branches.update",
+      "kind": "command",
+      "method": "PATCH",
+      "path": "/api/tenants/{tenantId}/branches/{branchId}",
+      "status": "REUSE",
+      "opId": "org.branch.update",
+      "permission": "role.manage",
+      "risk": "FOUR_EYES"
+    },
+    {
+      "name": "org.branches.delete",
+      "kind": "command",
+      "method": "DELETE",
+      "path": "/api/tenants/{tenantId}/branches/{branchId}",
+      "status": "REUSE",
+      "opId": "org.branch.delete",
+      "permission": "role.manage",
+      "risk": "FOUR_EYES"
+    },
+    {
+      "name": "org.branches.approve",
+      "kind": "command",
+      "method": "POST",
+      "path": "/api/approvals/{id}/approve",
+      "status": "REUSE",
+      "opId": "approval.resolve.approve",
+      "permission": "",
+      "risk": "FOUR_EYES"
+    },
+    {
+      "name": "org.branches.reject",
+      "kind": "command",
+      "method": "POST",
+      "path": "/api/approvals/{id}/reject",
+      "status": "REUSE",
+      "opId": "approval.resolve.reject",
+      "permission": "",
+      "risk": "FOUR_EYES"
+    }
+  ],
+  "screen": {
+    "portalPath": "/admin",
+    "screenPath": "/admin/branches",
+    "user": "platform-admin"
+  },
+  "createdAt": "2026-11-23T06:11:46.565Z",
+  "history": [
+    {
+      "at": "2026-11-23T06:11:46.566Z",
+      "event": "planned",
+      "detail": "Branches screen: create a branch (name), list with search, edit and delete; every change maker-checker approved; list shows name, who created, who approved, created date and time"
+    },
+    {
+      "at": "2026-11-23T06:12:11.040Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-23T06:15:57.436Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T06:16:31.750Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T06:19:33.173Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T06:24:44.409Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-23T06:26:00.861Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T06:27:13.489Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-23T06:27:46.032Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T06:28:35.725Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-23T06:29:08.750Z",
+      "event": "e2e-failed",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T06:30:17.704Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-23T06:30:46.849Z",
+      "event": "e2e-ok",
+      "detail": "workbench"
+    },
+    {
+      "at": "2026-11-23T06:31:55.232Z",
+      "event": "registered",
+      "detail": "org.branches@1.0.0 by platform-admin"
+    },
+    {
+      "at": "2026-11-23T06:33:20.561Z",
+      "event": "e2e-failed",
+      "detail": "portal"
+    },
+    {
+      "at": "2026-11-23T06:38:05.226Z",
+      "event": "ui-accepted",
+      "detail": "FathimaBadar · NEW: org.branches.get, org.branches.create, org.branches.update, org.branches.delete"
+    },
+    {
+      "at": "2026-11-23T06:48:21.757Z",
+      "event": "ops-changed",
+      "detail": "org.branches.list:REUSE org.branches.get:REUSE org.branches.create:REUSE org.branches.update:REUSE org.branches.delete:REUSE org.branches.approve:REUSE org.branches.reject:REUSE"
+    },
+    {
+      "at": "2026-11-23T06:48:47.726Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-23T06:54:17.996Z",
+      "event": "verify-ok"
+    },
+    {
+      "at": "2026-11-23T06:56:46.565Z",
+      "event": "e2e-ok",
+      "detail": "workbench+portal live"
+    },
+    {
+      "at": "2026-11-23T06:56:54.371Z",
+      "event": "done"
+    },
+    {
+      "at": "2026-11-24T07:23:34.369Z",
+      "event": "registered",
+      "detail": "org.branches@1.0.0 by platform-admin"
+    }
+  ],
+  "requirement": "Branches screen: create a branch (name), list with search, edit and delete; every change maker-checker approved; list shows name, who created, who approved, created date and time",
+  "verify": {
+    "at": "2026-11-23T06:54:17.995Z",
+    "ok": true,
+    "uiHash": "9f1ef221c2a1b0b1",
+    "steps": [
+      {
+        "step": "operations + code rules",
+        "ok": true
+      },
+      {
+        "step": "widgets:check",
+        "ok": true
+      },
+      {
+        "step": "tsc --noEmit (widget scope)",
+        "ok": true
+      },
+      {
+        "step": "eslint",
+        "ok": true
+      },
+      {
+        "step": "vitest",
+        "ok": true
+      },
+      {
+        "step": "widgets:skill fresh",
+        "ok": true
+      }
+    ]
+  },
+  "e2e": {
+    "workbench": {
+      "at": "2026-11-23T06:56:46.565Z",
+      "ok": true,
+      "uiHash": "9f1ef221c2a1b0b1"
+    },
+    "portal": {
+      "at": "2026-11-23T06:56:46.565Z",
+      "ok": true,
+      "uiHash": "9f1ef221c2a1b0b1",
+      "live": true
+    }
+  },
+  "registered": {
+    "at": "2026-11-24T07:23:34.292Z",
+    "version": "1.0.0",
+    "by": "platform-admin",
+    "uiHash": "9f1ef221c2a1b0b1"
+  },
+  "acceptance": {
+    "by": "FathimaBadar",
+    "at": "2026-11-23T06:38:05.220Z",
+    "note": "Branches screen UI + contract: list/search/filter/sort/page; four-eyes create/rename/delete; approve/reject in drawer; role.view/role.manage; admin console only",
+    "uiHash": "9f1ef221c2a1b0b1",
+    "contractHash": "0de840fb5df4b2c4",
+    "newOps": [
+      "org.branches.get",
+      "org.branches.create",
+      "org.branches.update",
+      "org.branches.delete"
+    ]
+  }
+}

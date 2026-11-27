@@ -23,4 +23,11 @@ public class Role {
     public String scope; // PLATFORM | TENANT | SUBTREE | EDGE
     @Column(nullable = false)
     public long version;
+    /** What the role is for (Add Role form: Role Description). */
+    @Column
+    public String description;
+    @Column(name = "branch_id")
+    public UUID branchId;
+    @Column(name = "department_id")
+    public UUID departmentId;
 }

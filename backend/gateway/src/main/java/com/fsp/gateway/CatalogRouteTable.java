@@ -39,8 +39,14 @@ public class CatalogRouteTable {
     public record PluginOp(String code, String baseUrl, String method, String pathTemplate, Pattern matcher,
                            String operationId, String permission) {}
 
+    /** A PLATFORM-SERVICE operation (emi/psp) from the service's own descriptor at its /internal/ops/catalog. */
+    public record ServiceOp(String component, String baseUrl, String method, String pathTemplate,
+                            Pattern matcher, String operationId, String permission) {}
+
     /** plugin operations, rebuilt on every refresh — only these plugin routes are forwarded */
     private final CopyOnWriteArrayList<PluginOp> pluginOps = new CopyOnWriteArrayList<>();
+
+    private final CopyOnWriteArrayList<ServiceOp> serviceOps = new CopyOnWriteArrayList<>();
 
     private final GatewayProperties props;
     private final RestClient rest;
@@ -119,6 +125,7 @@ public class CatalogRouteTable {
             log.warn("gateway_catalog_refresh_failed detail={}", e.getMessage());
         }
         refreshPluginUrls();
+        refreshServiceOps();
         if (!refreshed && routes.isEmpty()) {
             log.warn("gateway_refresh_no_routes core={}", props.getCoreBaseUrl());
         }
@@ -195,6 +202,65 @@ public class CatalogRouteTable {
         return pluginOps.stream()
             .filter(o -> o.method().equalsIgnoreCase(method) && o.matcher().matcher(path).matches())
             .findFirst();
+    }
+
+    /** The platform-service operation a request maps to — never core/plugin routes (they win). */
+    public java.util.Optional<ServiceOp> matchService(String method, String path) {
+        if (matches(method, path)) return java.util.Optional.empty();
+        return serviceOps.stream()
+            .filter(o -> o.method().equalsIgnoreCase(method) && o.matcher().matcher(path).matches())
+            .findFirst();
+    }
+
+    public int serviceOpsCount() { return serviceOps.size(); }
+
+    /**
+     * Fetch platform-service operation descriptors (EMI, PSP — credentials-gated) and build
+     * their routes. Same trust model as core's signed catalog: only /v1-prefixed,
+     * explicitly-method'd operations are routable, each under the service's EXCLUSIVE
+     * /v1/&lt;component&gt;/** namespace.
+     */
+    private void refreshServiceOps() {
+        List<ServiceOp> merged = new java.util.ArrayList<>();
+        merged.addAll(fetchServiceOps("emi", props.getEmiBaseUrl(), "/v1/emi/", "gateway_emi",
+            props.getEmiInternalCredential()));
+        merged.addAll(fetchServiceOps("psp", props.getPspBaseUrl(), "/v1/psp/", "gateway_psp",
+            props.getPspInternalCredential()));
+        serviceOps.clear();
+        serviceOps.addAll(merged);
+    }
+
+    private List<ServiceOp> fetchServiceOps(String component, String baseUrl,
+                                            String namespace, String logPrefix, String credential) {
+        try {
+            ResponseEntity<String> res = rest.method(HttpMethod.GET)
+                .uri(baseUrl + "/internal/ops/catalog")
+                .header("X-FSP-Internal-Credential", credential)
+                .retrieve().toEntity(String.class);
+            if (!res.getStatusCode().is2xxSuccessful() || res.getBody() == null) {
+                log.warn(logPrefix + "_catalog_fetch_failed status={}", res.getStatusCode().value());
+                return List.of();
+            }
+            var root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(res.getBody());
+            List<ServiceOp> rebuilt = new java.util.ArrayList<>();
+            root.path("operations").forEach(op -> {
+                String method = op.path("method").asText().toUpperCase();
+                String path = op.path("pathPattern").asText();
+                String id = op.path("operationId").asText();
+                String perm = op.path("permission").asText();
+                if (path.startsWith(namespace) && !method.isBlank() && !id.isBlank()) {
+                    rebuilt.add(new ServiceOp(component, baseUrl, method, path,
+                        compile(path), id, perm));
+                } else {
+                    log.warn(logPrefix + "_op_rejected op={} path={} reason=outside_namespace", id, path);
+                }
+            });
+            log.info(logPrefix + "_catalog_updated operations={}", rebuilt.size());
+            return rebuilt;
+        } catch (Exception e) {
+            log.warn(logPrefix + "_catalog_refresh_failed detail={}", e.getMessage());
+            return List.of();
+        }
     }
 
     public String digest() {

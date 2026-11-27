@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -7,12 +7,12 @@ import { widgetPackPlugin } from './tools/widget-pack/vite-plugin'
 const R = dirname(fileURLToPath(import.meta.url))
 
 /**
- * One workspace, four build identities + a chooser — the Vite equivalent of
+ * One workspace, five org/admin build identities + a chooser — the Vite equivalent of
  * the SME angular.json fileReplacements pattern (plans/ui-portals-plan.md §2.3).
  * Dev: / serves the chooser; /admin/**, /manufacturer/**, /distributor/**,
- * /wholesaler/ boot their own app with its own PortalConfig identity.
+ * /wholesaler/, /merchant/ boot their own app with its own PortalConfig identity.
  */
-const PORTALS = ['admin', 'manufacturer', 'distributor', 'wholesaler', 'widget-workbench']
+const PORTALS = ['admin', 'manufacturer', 'distributor', 'wholesaler', 'merchant', 'widget-workbench']
 
 /** Maps /<portal>/ to that entry HTML in dev + preview (build uses rollupOptions.input). */
 const portalEntries = () => ({
@@ -43,6 +43,8 @@ export default defineConfig({
       '/api': { target: 'http://localhost:8080', changeOrigin: true },
     },
   },
+  // Playwright specs (tests/e2e, tests/setup) drive the live stack; vitest owns unit tests only
+  test: { exclude: [...configDefaults.exclude, 'tests/e2e/**', 'tests/setup/**'] },
   build: {
     outDir: 'dist',
     sourcemap: true,
@@ -53,6 +55,7 @@ export default defineConfig({
         manufacturer: resolve(R, 'manufacturer.html'),
         distributor: resolve(R, 'distributor.html'),
         wholesaler: resolve(R, 'wholesaler.html'),
+        merchant: resolve(R, 'merchant.html'),
         'widget-workbench': resolve(R, 'widget-workbench.html'),
       },
     },

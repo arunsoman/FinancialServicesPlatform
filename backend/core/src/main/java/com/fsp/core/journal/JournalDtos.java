@@ -23,7 +23,7 @@ public final class JournalDtos {
                             String totalDebits, String totalCredits,
                             String status, String planHash, List<String> tbTransferIds,
                             UUID makerId, UUID checkerId, Instant finalizedAt, long version,
-                            List<LineView> lines) {}
+                            List<LineView> lines, UUID openApprovalId) {}
 
     public record PlanLegView(int legIndex, String transferId, UUID debitGlAccountId, UUID creditGlAccountId,
                               String amount, boolean linked) {}

@@ -42,8 +42,9 @@ public class IdpClient {
     public record TokenClaims(String userId, String username, String fullName, String tenantId,
                               String tenantName, String tenantType, java.util.List<String> roles) {}
 
+    /** refreshToken: present only on the authorization_code grant (FAPI 2.0: never rotated). */
     public record TokenResponse(String accessToken, String tokenType, long expiresIn,
-                                TokenClaims claims) {}
+                                TokenClaims claims, String refreshToken) {}
 
     private final RestClient rest;
     private final BffProperties props;
@@ -174,7 +175,7 @@ public class IdpClient {
             Instant.now().plusSeconds(expiresIn), oauthState);
 
         // Minimal authorization URL (FAPI 2.0 §5.3.2): only client_id + request_uri
-        String authzUrl = props.getGateway().getBaseUrl() + "/idp/authorize"
+        String authzUrl = props.getAuthorizeUrlBase() + "/idp/authorize"
             + "?client_id=" + CLIENT_ID
             + "&request_uri=" + java.net.URLEncoder.encode(requestUri, java.nio.charset.StandardCharsets.UTF_8);
 
@@ -218,6 +219,45 @@ public class IdpClient {
         }
 
         return tokenResponse.getBody();
+    }
+
+    /**
+     * refresh_token grant (FAPI 2.0): a fresh private_key_jwt + a DPoP proof by the SESSION's key,
+     * so the new access token stays bound to the same key. Returns null when the IdP refuses
+     * (revoked, expired, person no longer allowed) — the caller ends the session.
+     */
+    public TokenResponse refresh(String refreshToken, String dpopPrivateKeyJwk) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("grant_type", "refresh_token");
+        body.put("refresh_token", refreshToken);
+        body.put("client_assertion", createClientAssertion());
+        body.put("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
+        try {
+            var r = rest.method(HttpMethod.POST).uri("/idp/token")
+                .header("Content-Type", "application/json")
+                .header("DPoP", dpopProof(dpopPrivateKeyJwk, props.getIdpIssuer() + "/idp/token", "POST"))
+                .body(body).retrieve().toEntity(TokenResponse.class);
+            return r.getStatusCode().is2xxSuccessful() ? r.getBody() : null;
+        } catch (org.springframework.web.client.HttpClientErrorException e) {
+            return null; // 4xx = the grant is refused; never logged with the token
+        }
+    }
+
+    /** RFC 7009 revocation of the session's refresh token (logout trio). Best effort; never throws. */
+    public void revoke(String refreshToken, String reason) {
+        if (refreshToken == null) return;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("token", refreshToken);
+        body.put("token_type_hint", "refresh_token");
+        body.put("reason", reason);
+        body.put("client_assertion", createClientAssertion());
+        body.put("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
+        try {
+            rest.method(HttpMethod.POST).uri("/idp/revoke").header("Content-Type", "application/json")
+                .body(body).retrieve().toBodilessEntity();
+        } catch (RuntimeException e) {
+            log.warn("bff_refresh_revoke_failed reason={} error={}", reason, e.getClass().getSimpleName());
+        }
     }
 
     /** Create DPoP proof JWT for a given HTTP request (RFC 9449 §4.2). */

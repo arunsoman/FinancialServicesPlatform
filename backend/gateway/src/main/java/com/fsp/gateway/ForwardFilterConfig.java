@@ -55,9 +55,10 @@ public class ForwardFilterConfig {
     public FilterRegistrationBean<ForwardFilter> forwardFilter(GatewayProperties props,
                                                                CatalogRouteTable catalog,
                                                                JwksHolder jwks,
-                                                               com.fsp.shared.ActorAssertion assertions) {
+                                                               com.fsp.shared.ActorAssertion assertions,
+                                                               BrowserRateLimiter rateLimiter) {
         FilterRegistrationBean<ForwardFilter> reg =
-            new FilterRegistrationBean<>(new ForwardFilter(props, catalog, jwks, assertions));
+            new FilterRegistrationBean<>(new ForwardFilter(props, catalog, jwks, assertions, rateLimiter));
         reg.addUrlPatterns("/v1/*", "/idp/*");
         reg.setOrder(1);
         reg.setDispatcherTypes(DispatcherType.REQUEST);
@@ -82,16 +83,18 @@ public class ForwardFilterConfig {
         private final CatalogRouteTable catalog;
         private final JwksHolder jwks;
         private final org.springframework.web.client.RestClient rest;
+        private final BrowserRateLimiter rateLimiter;
         private final java.util.concurrent.ConcurrentHashMap<String, Long> dpopReplayCache = new java.util.concurrent.ConcurrentHashMap<>();
         private final ObjectMapper mapper = new ObjectMapper();
         private final com.fsp.shared.ActorAssertion assertions;
 
         public ForwardFilter(GatewayProperties props, CatalogRouteTable catalog, JwksHolder jwks,
-                             com.fsp.shared.ActorAssertion assertions) {
+                             com.fsp.shared.ActorAssertion assertions, BrowserRateLimiter rateLimiter) {
             this.props = props;
             this.catalog = catalog;
             this.jwks = jwks;
             this.assertions = assertions;
+            this.rateLimiter = rateLimiter;
             this.rest = org.springframework.web.client.RestClient.create();
         }
 
@@ -100,6 +103,18 @@ public class ForwardFilterConfig {
                                         FilterChain chain) throws ServletException, IOException {
             try {
                 MDC.put("traceId", UUID.randomUUID().toString());
+                // Edge rate limit per browser/client — reject burst before any token
+                // validation or authorization decision (defense-in-depth, not a FAPI spacing rule).
+                var verdict = rateLimiter.check(clientKey(request));
+                if (!verdict.allowed()) {
+                    log.warn("gateway_rate_limited path={} retryAfterMs={}",
+                        request.getRequestURI(), verdict.retryAfter().toMillis());
+                    problem(response, 429, "RATE_LIMITED",
+                        "Too many requests; slow down and retry after " + verdict.retryAfter().toMillis() + " ms");
+                    response.setHeader("Retry-After",
+                        String.valueOf(Math.max(1, verdict.retryAfter().toSeconds())));
+                    return;
+                }
                 handle(request, response);
             } catch (Exception e) {
                 log.error("gateway_forward_failure method={} path={} detail={}",
@@ -119,10 +134,12 @@ public class ForwardFilterConfig {
                 return;
             }
             boolean coreSide = path.startsWith("/v1/");
-            boolean idpSide = path.equals("/idp/jwks") || path.equals("/idp/token")
+            boolean idpSide = path.equals("/idp/jwks") || path.equals("/idp/token") || path.equals("/idp/revoke")
                 || path.equals("/idp/introspect") || path.equals("/idp/par")
                 || path.equals("/idp/authorize") || path.equals("/idp/authorize/callback")
                 || path.equals("/idp/login") || path.equals("/idp/error")
+                || path.equals("/idp/password/complete")
+                || path.equals("/idp/activate")
                 || path.equals("/idp/policy") || path.startsWith("/idp/policy/")
                 || path.startsWith("/idp/.well-known");
             if (coreSide && idpSide) {
@@ -136,7 +153,10 @@ public class ForwardFilterConfig {
             // Plugin routes come ONLY from REGISTERED manifests; core catalog routes always win.
             java.util.Optional<CatalogRouteTable.PluginOp> pluginOp =
                 coreSide ? catalog.matchPlugin(method, path) : java.util.Optional.empty();
-            if (coreSide && pluginOp.isEmpty() && !catalog.matches(method, path)) {
+            // Platform-service routes (emi/psp) come from the services' own descriptors.
+            java.util.Optional<CatalogRouteTable.ServiceOp> serviceOp =
+                coreSide ? catalog.matchService(method, path) : java.util.Optional.empty();
+            if (coreSide && pluginOp.isEmpty() && serviceOp.isEmpty() && !catalog.matches(method, path)) {
                 log.warn("gateway_route_rejected method={} path={}", method, path);
                 problem(response, 404, "ROUTE_NOT_IN_CATALOG",
                     "route is not a published FSP operation (catalog digest " + catalog.digest() + ")");
@@ -176,7 +196,8 @@ public class ForwardFilterConfig {
                         problem(response, 403, "ACTOR_TYPE_REJECTED", "plugin operations are person-only");
                         return;
                     }
-                    if (!admitToPlugin(pluginOp.get(), claims, method, path, trace, response, upstream)) {
+                    if (!admitToPlugin(pluginOp.get(), claims, method, path, trace, response, upstream,
+                            request.getHeader("X-Act-As"))) {
                         return; // Response already written
                     }
                     if (idem != null) {
@@ -185,7 +206,24 @@ public class ForwardFilterConfig {
                     upstream.set("X-Correlation-Id", trace);
                 } else {
                     // Core: re-issue trusted internal identity (guide §2): claims → headers + internal credential.
-                    upstream.set("X-FSP-Internal-Credential", props.getInternalCredential());
+                    // Platform-service ops (emi/psp) ride the same trusted re-issue, with one
+                    // extension: a service op that DECLARED a permission key gets a core
+                    // /internal/authz/decide first (core is the sole PDP, guide §3.5) — owner-
+                    // scoped ops (empty permission) skip the RBAC hop and enforce ownership
+                    // in-domain at the service (identity headers, act-as is not honoured here).
+                    if (serviceOp.isPresent() && !serviceOp.get().permission().isBlank() && !machine) {
+                        if (!decideService(serviceOp.get(), claims, trace, response, path)) return;
+                    }
+                    if (serviceOp.isPresent() && machine) {
+                        log.warn("gateway_service_machine_rejected path={} op={}",
+                            path, serviceOp.get().operationId());
+                        problem(response, 403, "ACTOR_TYPE_REJECTED",
+                            "platform-service operations are person-only");
+                        return;
+                    }
+                    // Red-team P0 fix: per-target hop credentials — each upstream gets ITS OWN
+                    // secret (core/EMI/PSP); the gateway holds only its own view of each.
+                    upstream.set("X-FSP-Internal-Credential", targetCredential(serviceOp));
                     upstream.set("X-FSP-Tenant-Id", claims.tenantId());
                     upstream.set("X-FSP-Client-Id", claims.clientId());
                     if (machine) {
@@ -199,6 +237,15 @@ public class ForwardFilterConfig {
                     } else {
                         upstream.set("X-FSP-User-Id", claims.userId());
                         upstream.set("X-FSP-Username", claims.username());
+                        // Act-as (plans/act-as-tenant-plan.md D4): the opaque session id rides to core
+                        // on the PERSON plane only. It is not an identity claim — core's ActAsFilter
+                        // honours it only when the session belongs to the verified person above and
+                        // is live, else 401 ACT_AS_EXPIRED (fail closed). Without this the BFF's id
+                        // was dropped here and act-as never reached core (no ceiling, no audit trail).
+                        String actAs = request.getHeader("X-Act-As");
+                        if (actAs != null && !actAs.isBlank()) {
+                            upstream.set("X-Act-As", actAs.trim());
+                        }
                     }
                     if (idem != null) {
                         upstream.set("Idempotency-Key", idem);
@@ -216,7 +263,7 @@ public class ForwardFilterConfig {
                         upstream.set("DPoP", dpopHeader);
                     }
                 } else if (path.startsWith("/idp/policy")) {
-                    upstream.set("X-FSP-Internal-Credential", props.getInternalCredential());
+                    upstream.set("X-FSP-Internal-Credential", props.getIdpInternalCredential());
                     String bearerUser = bearerUserId(authorization);
                     if (bearerUser != null) {
                         upstream.set("X-FSP-User-Id", bearerUser);
@@ -236,10 +283,12 @@ public class ForwardFilterConfig {
                 return;
             }
 
-            // Plugin upstream routing: /v1/plugins/<code>/ routes forward to the plugin baseUrl
+            // Plugin upstream routing: /v1/plugins/<code>/ routes forward to the plugin baseUrl;
+            // /v1/emi/** (and later /v1/psp/**) routes forward to the owning service.
             String targetBase;
             if (coreSide) {
-                targetBase = pluginOp.map(CatalogRouteTable.PluginOp::baseUrl).orElse(props.getCoreBaseUrl());
+                targetBase = pluginOp.map(CatalogRouteTable.PluginOp::baseUrl).orElse(
+                    serviceOp.map(CatalogRouteTable.ServiceOp::baseUrl).orElse(props.getCoreBaseUrl()));
             } else {
                 targetBase = props.getIdpBaseUrl();
             }
@@ -472,8 +521,52 @@ public class ForwardFilterConfig {
          */
         private boolean admitToPlugin(CatalogRouteTable.PluginOp op, JwtService.Claims claims, String method,
                                       String path, String trace, HttpServletResponse response,
-                                      HttpHeaders upstream) throws IOException {
+                                      HttpHeaders upstream, String actAsHeader) throws IOException {
             String tenantId = claims.tenantId();
+            // Act-as (plans/act-as-tenant-plan.md): a person acting as a tenant works on plugins AS that
+            // tenant. Core — the only owner of act-as sessions — resolves it for the VERIFIED person;
+            // anything but a live session of theirs refuses the call (never falls back to home).
+            String actSessionId = null;
+            String homeTenantId = null;
+            if (actAsHeader != null && !actAsHeader.isBlank()) {
+                String sid = actAsHeader.trim();
+                if (!sid.matches("[A-Za-z0-9-]{1,64}")) {
+                    problem(response, 401, "ACT_AS_EXPIRED", "Your session acting as another tenant has ended");
+                    return false;
+                }
+                try {
+                    ResponseEntity<String> res = rest.method(HttpMethod.GET)
+                        .uri(props.getCoreBaseUrl() + "/internal/act-as/" + sid)
+                        .header("X-FSP-Internal-Credential", props.getInternalCredential())
+                        .header("X-FSP-User-Id", claims.userId())
+                        .header("X-FSP-Tenant-Id", claims.tenantId())
+                        .header("X-FSP-Username", claims.username())
+                        .header("X-FSP-Client-Id", claims.clientId())
+                        .header("X-Correlation-Id", trace)
+                        .retrieve().toEntity(String.class);
+                    JsonNode live = mapper.readTree(res.getBody() == null ? "{}" : res.getBody());
+                    if (!claims.userId().equals(live.path("personId").asText())
+                        || live.path("targetTenantId").asText().isBlank()) {
+                        problem(response, 401, "ACT_AS_EXPIRED", "Your session acting as another tenant has ended");
+                        return false;
+                    }
+                    actSessionId = live.path("sessionId").asText();
+                    homeTenantId = live.path("homeTenantId").asText();
+                    tenantId = live.path("targetTenantId").asText();
+                } catch (org.springframework.web.client.RestClientResponseException e) {
+                    log.warn("gateway_plugin_act_as_refused path={} status={}", path, e.getStatusCode().value());
+                    if (e.getStatusCode().value() == 401) {
+                        problem(response, 401, "ACT_AS_EXPIRED", "Your session acting as another tenant has ended");
+                    } else {
+                        problem(response, 503, "ACT_AS_UNAVAILABLE", "Act-as session check unavailable");
+                    }
+                    return false;
+                } catch (Exception e) {
+                    log.warn("gateway_plugin_act_as_error path={} detail={}", path, e.getMessage());
+                    problem(response, 503, "ACT_AS_UNAVAILABLE", "Act-as session check unavailable");
+                    return false;
+                }
+            }
             try {
                 ResponseEntity<String> ready = rest.method(HttpMethod.GET)
                     .uri(props.getCoreBaseUrl() + "/internal/plugins/" + op.code() + "/effective?tenantId=" + tenantId)
@@ -493,13 +586,15 @@ public class ForwardFilterConfig {
 
             JsonNode decision;
             try {
-                String body = mapper.writeValueAsString(Map.of(
+                Map<String, Object> ask = new java.util.LinkedHashMap<>(Map.of(
                     "permission", op.permission(), "tenantId", tenantId, "operationId", op.operationId()));
+                if (actSessionId != null) ask.put("actSessionId", actSessionId);
+                String body = mapper.writeValueAsString(ask);
                 ResponseEntity<String> res = rest.method(HttpMethod.POST)
                     .uri(props.getCoreBaseUrl() + "/internal/authz/decide")
                     .header("X-FSP-Internal-Credential", props.getInternalCredential())
                     .header("X-FSP-User-Id", claims.userId())
-                    .header("X-FSP-Tenant-Id", tenantId)
+                    .header("X-FSP-Tenant-Id", claims.tenantId())
                     .header("X-FSP-Username", claims.username())
                     .header("X-FSP-Client-Id", claims.clientId())
                     .header("X-Correlation-Id", trace)
@@ -527,11 +622,55 @@ public class ForwardFilterConfig {
 
             String assertion = assertions.mint(new com.fsp.shared.ActorAssertion.Subject(
                     claims.userId(), tenantId, claims.username(), claims.clientId(), op.operationId(),
-                    op.permission(), tenantId, trace),
+                    op.permission(), tenantId, trace, actSessionId, homeTenantId),
                 "plugin:" + op.code(), method, path);
             upstream.set("X-FSP-Actor-Assertion", assertion);
-            log.info("gateway_plugin_admitted plugin={} op={} person={} tenant={}",
-                op.code(), op.operationId(), claims.userId(), tenantId);
+            log.info("gateway_plugin_admitted plugin={} op={} person={} tenant={} actAs={}",
+                op.code(), op.operationId(), claims.userId(), tenantId, actSessionId != null);
+            return true;
+        }
+
+        /**
+         * Core PDP decision for a permission-carrying platform-service op (guide §3.5):
+         * same contract as the plugin decide (uncached, revocation hits the next call).
+         * Owner-scoped ops (blank permission) never reach this — their resource ownership
+         * is enforced by the service itself against the verified identity headers.
+         */
+        private boolean decideService(CatalogRouteTable.ServiceOp op, JwtService.Claims claims,
+                                      String trace, HttpServletResponse response, String requestPath) throws IOException {
+            JsonNode decision;
+            try {
+                Map<String, Object> ask = new java.util.LinkedHashMap<>(Map.of(
+                    "permission", op.permission(), "tenantId", claims.tenantId(),
+                    "operationId", op.operationId()));
+                ResponseEntity<String> res = rest.method(HttpMethod.POST)
+                    .uri(props.getCoreBaseUrl() + "/internal/authz/decide")
+                    .header("X-FSP-Internal-Credential", props.getInternalCredential())
+                    .header("X-FSP-User-Id", claims.userId())
+                    .header("X-FSP-Tenant-Id", claims.tenantId())
+                    .header("X-FSP-Username", claims.username())
+                    .header("X-FSP-Client-Id", claims.clientId())
+                    .header("X-Correlation-Id", trace)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(mapper.writeValueAsString(ask))
+                    .retrieve().toEntity(String.class);
+                decision = mapper.readTree(res.getBody() == null ? "{}" : res.getBody());
+            } catch (Exception e) {
+                log.error("gateway_authz_unavailable path={} op={} detail={}", requestPath, op.operationId(), e.getMessage());
+                problem(response, 503, "AUTHZ_UNAVAILABLE", "Authorization decision unavailable");
+                return false;
+            }
+            if (!decision.path("allow").asBoolean(false)) {
+                String reason = decision.path("reason").asText("PERMISSION_DENIED");
+                log.warn("gateway_service_denied path={} op={} permission={} reason={}",
+                    requestPath, op.operationId(), op.permission(), reason);
+                response.setStatus(403);
+                response.setContentType("application/problem+json");
+                response.getWriter().write(mapper.writeValueAsString(Map.of(
+                    "status", 403, "code", reason, "title", reason, "permission", op.permission(),
+                    "detail", "This needs the " + op.permission() + " permission on your organization.")));
+                return false;
+            }
             return true;
         }
 
@@ -564,6 +703,21 @@ public class ForwardFilterConfig {
             var claims = jwks.verifier(props.getIssuer()).verify(
                 authorization.substring(7).trim(), jwks.jwks(), props.getIssuer(), props.getAudience());
             return claims == null ? null : claims.userId();
+        }
+
+        /**
+         * Derive a stable, per-browser rate-limit key. The browser holds only the BFF
+         * session cookie (tokens never enter the browser), so the cookie is the best
+         * client handle; fall back to client IP. The value is SHA-256 hashed so the
+         * raw cookie / IP is never stored or logged (AGENTS.md §1.5).
+         */
+        private String clientKey(HttpServletRequest request) {
+            String cookie = request.getHeader("Cookie");
+            String xff = request.getHeader("X-Forwarded-For");
+            String remote = request.getRemoteAddr();
+            String source = (cookie != null && !cookie.isBlank()) ? cookie :
+                (xff != null && !xff.isBlank() ? xff.split(",")[0].trim() : remote);
+            return source == null ? "unknown" : com.fsp.shared.Es256.sha256B64(source);
         }
 
         private byte[] readBody(HttpServletRequest request) throws IOException {
@@ -615,6 +769,17 @@ public class ForwardFilterConfig {
             int end = path.indexOf('/', start);
             if (end < 0) end = path.length();
             return path.substring(start, end);
+        }
+
+        /** Per-target internal-hop credential (red-team P0 fix): the gateway never holds one
+         *  god-key — core ops stamp core's secret, EMI ops EMI's, PSP ops PSP's; unknown
+         *  upstreams get the core secret (they are core-routed by construction). */
+        private String targetCredential(java.util.Optional<CatalogRouteTable.ServiceOp> serviceOp) {
+            return serviceOp.map(op -> switch (op.component()) {
+                case "emi" -> props.getEmiInternalCredential();
+                case "psp" -> props.getPspInternalCredential();
+                default -> props.getInternalCredential();
+            }).orElse(props.getInternalCredential());
         }
     }
 }

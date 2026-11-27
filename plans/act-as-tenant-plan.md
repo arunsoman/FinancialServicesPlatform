@@ -71,7 +71,7 @@ Browser/BFF sends `X-Act-As: <sessionId>`. `ActAsFilter` runs after `ActorContex
    (else **401 `ACT_AS_EXPIRED`** — never silently falls back to home org)
 2. Touches `last_seen_at` (max once per minute)
 3. Replaces the principal with the **acting principal**: same `personId`, name; `activeTenantId` =
-   target tenant; `type` = DELEGATED; `homeTenantId` tracked separately
+   target tenant; `type` = ACTING; `homeTenantId` + `actSessionId` tracked separately
 
 The `PermissionService.effectiveKeysForActing()` caps permissions by the target tenant's ceiling.
 
@@ -94,14 +94,29 @@ The ceiling prevents privilege escalation: acting can only narrow what you may d
 
 ### 3.6 Actor changes
 
-`Actor` already has `type` (PERSON/MACHINE/DELEGATED). While acting:
+`Actor.type` gains `ACTING` (PERSON/MACHINE/DELEGATED/ACTING — DELEGATED stays plugin-for-person). While acting:
 - `personId` = real person
 - `activeTenantId` = target tenant
-- `type` = DELEGATED
+- `type` = ACTING (admitted wherever PERSON is; never by plugin client grants)
 - `clientId` = null
 - `homeTenantId` carried in `RequestCorrelation` (thread-local)
 
 ---
+
+### 3.7 Act-as through plugins (added 2026-11-19)
+
+A person→plugin call (e.g. KYC "New onboarding") never carries the person's token past the gateway; the
+plugin works from the gateway's signed **actor assertion**. While acting:
+
+1. The gateway sees `X-Act-As` (BFF-injected), asks core `GET /internal/act-as/{id}` for the VERIFIED
+   person; anything but a live session of theirs → 401 `ACT_AS_EXPIRED` (never falls back to home).
+2. Readiness + `/internal/authz/decide` run against the **acted-as** tenant; decide re-verifies the
+   session and decides the person as `ACTING` (ceiling-capped).
+3. The assertion is minted with `tid` = acted-as tenant plus `act` (session) + `home` claims
+   (`com.fsp.shared.ActorAssertion`). Plugins need no change: their owner tenant is the assertion's `tid`.
+4. On the plugin's on-behalf core calls, `ActorAssertionService` re-verifies the session (live, this
+   person, this target) and records home + session: the DELEGATED actor's person side is ceiling-capped
+   and every audit row carries `act_session_id`.
 
 ## 4. Build order
 
@@ -111,7 +126,7 @@ The ceiling prevents privilege escalation: acting can only narrow what you may d
 | AA2 | `V14__act_as_sessions.sql` migration + `ActAsSession` entity + `ActAsRepository` |
 | AA3 | `ActAsService` (start/end/current/live with TTL + idle) |
 | AA4 | `ActAsController` (POST/GET/DELETE `/v1/act-as`) |
-| AA5 | `ActAsFilter` (X-Act-As header, replaces principal) + `CoreConfig` registration | ✅ gateway strip list excludes `X-Act-As` (validated person-anchored in core, fails closed) |
+| AA5 | `ActAsFilter` (X-Act-As header, replaces principal) + `CoreConfig` registration | ✅ gateway **forwards** `X-Act-As` on the person plane (`ForwardFilterConfig` re-issues an allow-list, so "not stripped" was not enough — fixed 2026-11-19); validated person-anchored in core, fails closed |
 | AA6 | `PermissionService.effectiveKeysForActing()` (ceiling cap) |
 | AA7 | `AuditRecord` + `AuditService` acting columns + `RequestCorrelation.homeTenantId` |
 | AA8 | Permission `tenant.act_as` seeded to PLATFORM_ADMIN (system seed or new migration) | ✅ V14 explicit grant to PLATFORM_ADMIN — covers BOTH `platform-admin` and `admin-checker` (both hold that role in V2; V2's blanket grant predates the key) |
@@ -129,14 +144,14 @@ The ceiling prevents privilege escalation: acting can only narrow what you may d
 | D3 | One live session per person; new starts previous | Yes |
 | D4 | `X-Act-As` header passthrough through gateway (not stripped) | Yes |
 | D5 | Ceiling cap = roles directly at target tenant (no ancestor roles in ceiling) | Yes |
-| D6 | Actor `type` = DELEGATED while acting, `homeTenantId` in `RequestCorrelation` | Yes |
+| D6 | ~~Actor `type` = DELEGATED while acting~~ → **revised 2026-11-19: `type` = ACTING**, `homeTenantId` + `actSessionId` in `RequestCorrelation`. DELEGATED already meant "plugin acting for a person"; sharing it made every person op refuse act-as (`ACTOR_TYPE_REJECTED`) and let an acting person through the plugin-only `PLUGIN:` approval gate | Yes (revised) |
 | D7 | Act-as needs `rbac.mode=enforce` (refused otherwise) | Yes |
 
 ---
 
 ## 6. Out of scope (later)
 
-- Frontend banner + `ActAsService` SPA client (widget harness slice)
+- ~~Frontend banner + `ActAsService` SPA client~~ — done: banner + Exit in the app shell; Organization → pick an org → its users (read-only) → **Act as <org> admin** (`users.organization` scope `selected`)
 - Nested act-as depth limit (no hard limit; path shown in session view)
 - Business screens while acting (merchant sales, supplier stock — read legacy IDs, stay unavailable)
 - Risk tier / step-up at session start

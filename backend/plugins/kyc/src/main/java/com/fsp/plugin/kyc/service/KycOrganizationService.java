@@ -26,6 +26,31 @@ public class KycOrganizationService {
         this.caseRepository = caseRepository;
     }
 
+    /**
+     * kyc.org.get — one organization's KYC standing. Core decides visibility (the person's chain,
+     * via the actor assertion); the plugin adds the latest case it holds for that subject.
+     */
+    @Transactional(readOnly = true)
+    public KycDtos.OrganizationRow get(UUID tenantId, String actorAssertion) {
+        Map<String, Object> t = coreClient.getTenant(tenantId, actorAssertion);
+        KycCase latest = caseRepository.findBySubjectTenantId(tenantId).stream()
+            .max(java.util.Comparator.comparing((KycCase c) -> c.updatedAt))
+            .orElse(null);
+        Object parent = t.get("parentTenantId");
+        return new KycDtos.OrganizationRow(
+            tenantId,
+            t.get("legalName") == null ? null : String.valueOf(t.get("legalName")),
+            t.get("subType") == null ? null : String.valueOf(t.get("subType")),
+            String.valueOf(t.getOrDefault("status", "")),
+            String.valueOf(t.getOrDefault("verificationStatus", "")),
+            Integer.valueOf(String.valueOf(t.getOrDefault("depth", "0"))),
+            parent == null ? null : UUID.fromString(String.valueOf(parent)),
+            latest != null ? latest.id : null,
+            latest != null ? latest.status : null,
+            latest != null ? latest.riskRating : null,
+            latest != null ? latest.nextReviewDate : null);
+    }
+
     @Transactional(readOnly = true)
     public KycDtos.OrganizationListResponse list(UUID ownerTenantId, int page, int size,
                                                   String q, String status, String sort,

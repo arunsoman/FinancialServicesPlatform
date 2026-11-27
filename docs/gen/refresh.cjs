@@ -101,18 +101,34 @@ writeIfChanged('dependencies.md', dep.join('\n') + '\n');
 let ops = ['# Auto-generated — every @FspOperation declared in core (routed only if listed here).', '',
   '| Operation id | Permission | Risk | Source |', '|---|---|---|---|'];
 const seen = new Set();
-for (const f of walk(path.join(ROOT, 'backend/core/src'), ['.java'])) {
+for (const f of walk(path.join(ROOT, 'backend/core/src/main'), ['.java'])) {
   const txt = fs.readFileSync(f, 'utf8');
-  const re = /@FspOperation\(\s*id\s*=\s*"([^"]+)"\s*,\s*permission\s*=\s*"([^"]+)"(?:\s*,\s*component\s*=\s*"([^"]*)")?(?:\s*,\s*risk\s*=\s*FspOperation\.OperationRisk\.([A-Z_]+))?[^)]*\)/g;
-  let m;
+  const re = /@FspOperation\(\s*id\s*=\s*"([^"]+)"(?:\s*,\s*permission\s*=\s*"([^"]*)")?(?:\s*,\s*component\s*=\s*"([^"]*)")?(?:\s*,\s*risk\s*=\s*FspOperation\.OperationRisk\.([A-Z_]+))?[^)]*\)/g; let m;
   while ((m = re.exec(txt))) {
     const key = m[1];
     if (seen.has(key)) { console.error(`DUPLICATE operation id ${key} in ${rel(f)}`); process.exitCode = 1; continue; }
     seen.add(key);
-    ops.push(`| ${m[1]} | ${m[2]} | ${m[4] ?? '—'} | \`${rel(f).split('/').pop()}\` |`);
+    ops.push(`| ${m[1]} | ${m[2] && m[2].length ? m[2] : '—(owner-scoped)'} | ${m[4] ?? '—'} | \`${rel(f).split('/').pop()}\` |`);
   }
 }
-writeIfChanged('operations.md', ops.sort().join('\n') + '\n');
+
+// EMI service operations — same contract shape from its local @EmiOperation declarations
+// (routes derived from the descriptor the gateway fetches at emi :8086 /internal/ops/catalog).
+const emiOps = ["# Auto-generated — @EmiOperation operations in emi (routed via emi's /internal/ops/catalog desc).", '',
+  '| Operation id | Permission | Risk | Source |', '|---|---|---|---|'];
+const seenEmi = new Set();
+for (const f of walk(path.join(ROOT, 'backend/emi/src'), ['.java'])) {
+  const txt = fs.readFileSync(f, 'utf8');
+  const re = /@EmiOperation\(\s*id\s*=\s*"([^"]+)"(?:\s*,\s*risk\s*=\s*EmiOperation\.Risk\.([A-Z_]+))?(?:\s*,\s*title\s*=\s*"([^"]*)")?\s*\)/g;
+  let m;
+  while ((m = re.exec(txt))) {
+    const key = m[1];
+    if (seenEmi.has(key)) { console.error(`DUPLICATE emi operation id ${key} in ${rel(f)}`); process.exitCode = 1; continue; }
+    seenEmi.add(key);
+    emiOps.push(`| ${m[1]} | —(owner-scoped) | ${m[2] ?? '—'} | \`${rel(f).split('/').pop()}\` |`);
+  }
+}
+writeIfChanged('operations.md', ops.sort().join('\n') + '\n\n---\n\n' + emiOps.join('\n') + '\n');
 
 // ---------------------------------------------------------------- migrations
 const migDir = path.join(ROOT, 'backend/core/src/main/resources/db/migration');

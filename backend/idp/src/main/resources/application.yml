@@ -21,7 +21,9 @@ fsp:
     issuer: ${FSP_IDP_ISSUER:https://idp.fsp.local}
     access-token-ttl-seconds: ${FSP_IDP_TOKEN_TTL:900}
     signing-key-path: ${FSP_IDP_SIGNING_KEY:../infrastructure/pki/dev/idp-signing.pem}
-    internal-credential: ${FSP_INTERNAL_CREDENTIAL:dev-internal-credential}
+    internal-credential: ${FSP_INTERNAL_CREDENTIAL_IDP:}
+    # V36: public origin (the gateway) of the hosted activation page linked from mails/SMS
+    public-base-url: ${FSP_PUBLIC_BASE_URL:http://localhost:8090}
 logging:
   pattern:
     console: "ts=%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX,UTC} level=%p traceId=%X{traceId} tenantId=%X{tenantId} userId=%X{userId} logger=%c{1} msg=%m ex=%replace(%ex){'\n',' | '}%n"

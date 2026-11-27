@@ -4,6 +4,7 @@ import com.fsp.core.common.Actor;
 import com.fsp.core.common.ApiException;
 import com.fsp.core.common.FspOperation;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,24 +20,30 @@ import java.util.List;
 import java.util.UUID;
 
 /** Organization user administration — every operation is gated on user.manage at the target org. */
+@Slf4j
 @RestController
 public class UserAdminController {
 
     private static final String BASE = "/v1/tenants/{tenantId}/users";
 
     private final UserAdminService service;
+    private final IdpInternalClient idp;
 
-    public UserAdminController(UserAdminService service) {
+    public UserAdminController(UserAdminService service, IdpInternalClient idp) {
         this.service = service;
+        this.idp = idp;
     }
 
     @FspOperation(id = "user.list", component = "identity", permission = UserAdminService.PERMISSION,
         title = "List organization users")
     @GetMapping(BASE)
-    public List<UserDtos.UserView> list(HttpServletRequest request, @PathVariable("tenantId") UUID tenantId,
-                                        @RequestParam(value = "page", required = false, defaultValue = "0") Integer page,
-                                        @RequestParam(value = "size", required = false, defaultValue = "25") Integer size) {
-        return service.list(tenantId, actor(request), page, size);
+    public UserDtos.UserPage list(HttpServletRequest request, @PathVariable("tenantId") UUID tenantId,
+                                  @RequestParam(value = "page", required = false) Integer page,
+                                  @RequestParam(value = "size", required = false) Integer size,
+                                  @RequestParam(value = "q", required = false) String q,
+                                  @RequestParam(value = "status", required = false) String status,
+                                  @RequestParam(value = "sort", required = false) String sort) {
+        return service.list(tenantId, actor(request), page, size, q, status, sort);
     }
 
     @FspOperation(id = "user.get", component = "identity", permission = UserAdminService.PERMISSION,
@@ -98,6 +105,39 @@ public class UserAdminController {
                                     @PathVariable("personId") UUID personId,
                                     @RequestParam(value = "expectedVersion", required = false) Long expectedVersion) {
         return service.remove(tenantId, personId, expectedVersion, actor(request));
+    }
+
+    /** Admin-initiated password reset request (four-eyes): opens a USER_PASSWORD_RESET
+     *  approval awaiting checker resolution; the IdP then sends the reset link. */
+    @FspOperation(id = "user.password.reset.request", component = "identity",
+        permission = UserAdminService.PERMISSION,
+        risk = FspOperation.OperationRisk.WRITE, title = "Request admin-initiated password reset (four-eyes)")
+    @PostMapping(BASE + "/{personId}/password-reset-request")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public UserDtos.UserView passwordResetRequest(HttpServletRequest request,
+                                                  @PathVariable("tenantId") UUID tenantId,
+                                                  @PathVariable("personId") UUID personId,
+                                                  @RequestBody(required = false) UserDtos.Transition body) {
+        return service.passwordResetRequest(tenantId, personId,
+            body == null ? null : body.expectedVersion(), actor(request));
+    }
+
+    /** Re-send the IdP activation (email link / SMS code) to an approved user who hasn't set
+     *  their password yet. Supersedes the earlier one. Not four-eyes: it grants nothing — the
+     *  user can only set a password for the account the checker already approved. */
+    @FspOperation(id = "user.activation.resend", component = "identity",
+        permission = UserAdminService.PERMISSION,
+        risk = FspOperation.OperationRisk.WRITE, title = "Re-send a user's activation to their primary contact")
+    @PostMapping(BASE + "/{personId}/activation")
+    public UserDtos.ActivationSent resendActivation(HttpServletRequest request,
+                                                    @PathVariable("tenantId") UUID tenantId,
+                                                    @PathVariable("personId") UUID personId) {
+        Actor a = actor(request);
+        Person p = service.requireAwaitingActivation(tenantId, personId, a);
+        idp.triggerActivation(p.id); // outside any DB transaction
+        service.recordActivationResent(tenantId, p, a);
+        log.info("user_activation_resent personId={} tenant={} by={}", p.id, tenantId, a.personId());
+        return new UserDtos.ActivationSent(p.id, p.primaryContact);
     }
 
     private static Actor actor(HttpServletRequest request) {

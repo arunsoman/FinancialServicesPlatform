@@ -15,7 +15,7 @@ import type {
 } from './model';
 import { CASE_STATUSES, MASK, RISKS, SORT_KEYS } from './model';
 
-export const FIXTURE_ME = { id: '00000000-0000-0000-0000-0000000002d1', name: 'Anna Shikongo' };
+export const FIXTURE_ME = { id: '00000000-0000-0000-0000-0000000002d1', name: 'Anna Shikongo', isChecker: true };
 const OTHERS = [
   { id: '00000000-0000-0000-0000-0000000002d2', name: 'Johannes Kapuka' },
   { id: '00000000-0000-0000-0000-0000000002d3', name: 'Maria Nghipondoka' },
@@ -193,7 +193,8 @@ function view(r: Row, req: FixtureRequest): CaseView {
   // the plugin sends a sentence for the maker block (KycCaseService.get) — mirror it
   const blockedReason = !open ? 'STATE'
     : mine ? 'You submitted this application — another reviewer must decide (four-eyes)'
-    : !req.permissions.includes('kyc.approve') ? 'PERMISSION' : null;
+    : !req.permissions.includes('kyc.approve') ? 'PERMISSION'
+    : !FIXTURE_ME.isChecker ? 'CHECKER' : null;
   const rest: Partial<Row> = { ...r };
   delete rest.makerId;
   delete rest.history;
@@ -252,7 +253,7 @@ function list(req: FixtureRequest): Page<ReturnType<typeof summary>> {
       (!status.length || status.includes(r.status)) &&
       (!risk.length || (r.riskRating !== null && risk.includes(r.riskRating))) &&
       (!needle ||
-        [r.legalName, r.dbaName ?? '', r.registrationNumber, r.taxId, r.caseNo].some((f) => f.toLowerCase().includes(needle))),
+        [r.legalName, r.dbaName ?? '', r.registrationNumber ?? '', r.taxId, r.caseNo].some((f) => f.toLowerCase().includes(needle))),
   );
   const key = SORT_EXPR[sk as SortKey];
   const dir = sd === 'asc' ? 1 : -1;
@@ -385,6 +386,9 @@ function decide(req: FixtureRequest): CaseView {
   checkVersion(r, req.body);
   if (r.makerId === FIXTURE_ME.id) {
     throw problem(403, 'MAKER_CANNOT_APPROVE', 'You submitted this application — another reviewer must decide.');
+  }
+  if (!FIXTURE_ME.isChecker) {
+    throw problem(403, 'CHECKER_NOT_ENABLED', 'Only designated checkers may decide KYC cases.');
   }
   if (b.decision !== 'APPROVE' && !(b.reason ?? '').trim()) throw problem(400, 'KYC_REASON_REQUIRED', `reason is required for ${b.decision}`);
   const now = new Date().toISOString();

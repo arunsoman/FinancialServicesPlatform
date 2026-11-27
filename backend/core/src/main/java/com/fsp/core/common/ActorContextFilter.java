@@ -56,8 +56,18 @@ public class ActorContextFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         boolean protectedPath = path.startsWith("/v1/") || path.startsWith("/internal/");
         if (protectedPath) {
+            // Fail-closed: an unconfigured credential (blank) closes the internal plane entirely.
+            if (expectedCredential == null || expectedCredential.isBlank()) {
+                log.error("internal_plane_closed path={} remote={} reason=credential_not_configured",
+                    path, request.getRemoteAddr());
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                response.setContentType("application/json");
+                response.getWriter().write(
+                    "{\"code\":\"INTERNAL_PLANE_CLOSED\",\"detail\":\"Internal credential not configured\"}");
+                return;
+            }
             String credential = request.getHeader(INTERNAL_CREDENTIAL);
-            if (credential == null || !credential.equals(expectedCredential)) {
+            if (credential == null || credential.isBlank() || !constantTimeEquals(credential, expectedCredential)) {
                 log.warn("internal_credential_invalid path={} remote={} state={}",
                     path, request.getRemoteAddr(),
                     credential == null ? "missing" : "mismatch");
@@ -149,6 +159,13 @@ public class ActorContextFilter extends OncePerRequestFilter {
         response.setStatus(status);
         response.setContentType("application/json");
         response.getWriter().write("{\"code\":\"" + code + "\",\"detail\":\"" + detail.replace("\"", "'") + "\"}");
+    }
+
+    /** Constant-time comparison — never leak the secret through response timing. */
+    private static boolean constantTimeEquals(String given, String expected) {
+        return java.security.MessageDigest.isEqual(
+            given.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            expected.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private static void bindMdc(String correlation, Actor actor) {

@@ -44,7 +44,7 @@ class UiHarnessServiceTest {
     void rejectsUnknownPermissionCell() {
         PermissionRepository perms = org.mockito.Mockito.mock(PermissionRepository.class);
         when(perms.findById(any())).thenReturn(Optional.empty());
-        WidgetRegistryService svc = new WidgetRegistryService(null, perms, permissivePermissions(), org.mockito.Mockito.mock(UiBundleService.class));
+        WidgetRegistryService svc = new WidgetRegistryService(null, perms, permissivePermissions());
 
         var dto = new UiDtos.WidgetRegistration("kyc.orgs", "1.0.0", "Org tree", "kyc",
             "widgets/kyc-orgs", List.of("admin"), List.of("kyc.org.view"), null);
@@ -57,8 +57,7 @@ class UiHarnessServiceTest {
     void rejectsBadWidgetId() {
         WidgetRegistryService svc = new WidgetRegistryService(
             org.mockito.Mockito.mock(UiWidgetRepository.class),
-            org.mockito.Mockito.mock(PermissionRepository.class), permissivePermissions(),
-            org.mockito.Mockito.mock(UiBundleService.class));
+            org.mockito.Mockito.mock(PermissionRepository.class), permissivePermissions());
 
         var dto = new UiDtos.WidgetRegistration("Bad Id", "1.0.0", "l", "c", "b", List.of(), List.of(), null);
         assertThatThrownBy(() -> svc.register(dto, ADMIN))
@@ -72,7 +71,7 @@ class UiHarnessServiceTest {
         PermissionRepository perms = org.mockito.Mockito.mock(PermissionRepository.class);
         when(perms.findById("kyc.org.view")).thenReturn(Optional.of(new Permission()));
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        WidgetRegistryService svc = new WidgetRegistryService(repo, perms, permissivePermissions(), org.mockito.Mockito.mock(UiBundleService.class));
+        WidgetRegistryService svc = new WidgetRegistryService(repo, perms, permissivePermissions());
 
         var dto = new UiDtos.WidgetRegistration("kyc.orgs", "1.0.0", "Org tree", "kyc",
             "widgets/kyc-orgs", List.of("admin"), List.of("kyc.org.view"), null);
@@ -91,7 +90,7 @@ class UiHarnessServiceTest {
         ReflectionTestUtils.setField(root, "id", ROOT);
         when(tenants.findByParentTenantId(null)).thenReturn(List.of(root));
         return new PortalLayoutService(repo, tenants, permissivePermissions(), approvalService, approvals,
-            new LayoutValidator());
+            new LayoutValidator(), new com.fsp.core.common.KeyLocks());
     }
 
     @Test
@@ -140,29 +139,96 @@ class UiHarnessServiceTest {
     }
 
     @Test
-    void handlerPublishesDraftIntoPublishedRow() {
+    void saveDraftIsLockedWhilePublishApprovalPending() {
+        UiLayout draft = draft();
+        UiLayoutRepository repo = org.mockito.Mockito.mock(UiLayoutRepository.class);
+        when(repo.findFirstByPortalAndStatus("admin", UiLayout.Status.DRAFT)).thenReturn(Optional.of(draft));
+        when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        ApprovalRequestRepository approvals = org.mockito.Mockito.mock(ApprovalRequestRepository.class);
+        when(approvals.existsByOperationTypeAndTargetResourceIdAndStatus(
+            ApprovalRequest.OpType.UI_LAYOUT_PUBLISH, draft.id, ApprovalRequest.Status.PENDING_CHECKER)).thenReturn(true);
+        PortalLayoutService svc = layoutService(repo, approvals, null);
+
+        var req = new UiDtos.LayoutSaveRequest(
+            "{\"portal\":\"admin\",\"menus\":[{\"id\":\"m1\",\"label\":\"Main\"," +
+                "\"screens\":[{\"id\":\"s1\",\"label\":\"Dash\",\"placedWidgets\":[]}]}]}", 1);
+        // Maker-checker integrity: while a publish approval is PENDING_CHECKER, no one (not
+        // even the maker) may mutate the draft — the checker must decide the submitted snapshot.
+        assertThatThrownBy(() -> svc.saveDraft("admin", req, ADMIN))
+            .isInstanceOf(ApiException.class)
+            .satisfies(e -> assertThat(((ApiException) e).getCode()).isEqualTo("APPROVAL_STATE"));
+        org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
+    void saveDraftAllowsEditingWhenNoApprovalPending() {
+        UiLayout draft = draft();
+        UiLayoutRepository repo = org.mockito.Mockito.mock(UiLayoutRepository.class);
+        when(repo.findFirstByPortalAndStatus("admin", UiLayout.Status.DRAFT)).thenReturn(Optional.of(draft));
+        when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        ApprovalRequestRepository approvals = org.mockito.Mockito.mock(ApprovalRequestRepository.class);
+        PortalLayoutService svc = layoutService(repo, approvals, null);
+
+        var req = new UiDtos.LayoutSaveRequest(
+            "{\"portal\":\"admin\",\"menus\":[{\"id\":\"m1\",\"label\":\"Main\"," +
+                "\"screens\":[{\"id\":\"s1\",\"label\":\"Dash\",\"placedWidgets\":[]}]}]}", 1);
+        assertThat(svc.saveDraft("admin", req, ADMIN)).isSameAs(draft);
+    }
+
+    @Test
+    void handlerPublishesSubmittedSnapshotNotLaterDraftEdit() {
         UiLayout draft = draft();
         UiLayoutRepository repo = org.mockito.Mockito.mock(UiLayoutRepository.class);
         when(repo.findById(draft.id)).thenReturn(Optional.of(draft));
         when(repo.findFirstByPortalAndStatus("admin", UiLayout.Status.PUBLISHED)).thenReturn(Optional.empty());
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        UiBundleService bundleSvc = org.mockito.Mockito.mock(UiBundleService.class);
-        UiLayoutPublishHandler handler = new UiLayoutPublishHandler(repo, bundleSvc);
+        UiLayoutPublishHandler handler = new UiLayoutPublishHandler(repo, new LayoutValidator());
 
+        String submittedSnapshot = "{\"portal\":\"admin\",\"menus\":[{\"id\":\"m1\",\"label\":\"Approved\"," +
+            "\"screens\":[{\"id\":\"s1\",\"label\":\"Dash\",\"placedWidgets\":[]}]}]}";
+        String laterUnreviewedEdit = "{\"portal\":\"admin\",\"menus\":[]}";
+        draft.layoutJson = laterUnreviewedEdit; // maker snuck in an edit after submit
         ApprovalRequest approval = new ApprovalRequest();
         approval.id = UUID.randomUUID();
         approval.targetResourceId = draft.id;
+        approval.payload = submittedSnapshot; // what the checker actually reviewed
         handler.apply(approval, true, CHECKER, "ok");
 
+        // The PUBLISHED row carries the approved snapshot, never the later unreviewed edit.
         org.mockito.Mockito.verify(repo).save(org.mockito.Mockito.argThat(l ->
             UiLayout.Status.PUBLISHED.equals(l.status)
-                && l.layoutJson.equals(draft.layoutJson)
+                && l.layoutJson.equals(submittedSnapshot)
+                && !l.layoutJson.equals(laterUnreviewedEdit)
                 && l.publishedApprovalId.equals(approval.id)));
     }
 
     @Test
+    void handlerRefusesToPublishWithoutSubmittedSnapshot() {
+        UiLayout draft = draft();
+        UiLayoutRepository repo = org.mockito.Mockito.mock(UiLayoutRepository.class);
+        when(repo.findById(draft.id)).thenReturn(Optional.of(draft));
+        UiLayoutPublishHandler handler = new UiLayoutPublishHandler(repo, new LayoutValidator());
+
+        ApprovalRequest approval = new ApprovalRequest();
+        approval.id = UUID.randomUUID();
+        approval.targetResourceId = draft.id;
+        approval.payload = null;
+        assertThatThrownBy(() -> handler.apply(approval, true, CHECKER, "ok"))
+            .isInstanceOf(IllegalStateException.class);
+        org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
+    void publishIsAtomicWithApprovalResolution() {
+        // DB-only effect (the layout row) must commit WITH the approval row — else a
+        // bundle failure strands an APPROVED approval whose layout never publishes.
+        assertThat(new UiLayoutPublishHandler(null, new LayoutValidator()).atomicWithResolution())
+            .isTrue();
+    }
+
+    @Test
     void publishHandlerOpTypeIsWired() {
-        assertThat(new UiLayoutPublishHandler(null, null).operationType())
+        assertThat(new UiLayoutPublishHandler(null, new LayoutValidator()).operationType())
             .isEqualTo(ApprovalRequest.OpType.UI_LAYOUT_PUBLISH);
     }
 

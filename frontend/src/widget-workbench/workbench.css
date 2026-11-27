@@ -88,6 +88,8 @@
 /* ---------------- connection bar */
 .wb .conn { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 8px 12px; border-radius: 10px;
   background: var(--wb-panel); border: 1px solid var(--wb-border); font-size: 13px; }
+.wb .conn { position: sticky; top: 0; z-index: 30; }
+.wb .conn .account { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; white-space: nowrap; }
 .wb .conn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--wb-dim); }
 .wb .conn .dot.on { background: var(--wb-ok); }
 
@@ -97,12 +99,22 @@
 .wb .bd-top label { display: grid; gap: 3px; color: var(--wb-dim); }
 .wb .badge { padding: 4px 10px; border-radius: 99px; background: var(--wb-panel-2); font-size: 12px; }
 .wb .badge.bad { color: var(--wb-bad); } .wb .badge.ok { color: var(--wb-ok); }
-.wb .bd { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
-/* the canvas needs the width: below a wide desktop the inspector drops under it */
+.wb .bd { display: grid; grid-template-columns: 260px minmax(0, 1fr) minmax(0, 300px); gap: 14px; align-items: start; }
+/* below a wide desktop the inspector becomes a right drawer instead of starving the canvas;
+   below 900px the rail becomes a drawer too and the inspector docks bottom (§4.10) */
 @media (max-width: 1500px) {
   .wb .bd { grid-template-columns: 240px minmax(0, 1fr); }
-  .wb .bd-left { grid-row: span 2; }
-  .wb .bd-right { grid-column: 2; max-height: none; }
+  .wb .bd-right { position: fixed; top: 120px; right: 12px; bottom: 12px; width: 300px; z-index: 40;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .18); }
+}
+@media (max-width: 900px) {
+  .wb .bd { grid-template-columns: minmax(0, 1fr); }
+  .wb .bd-left { display: none; }
+  .wb .bd-left.open { display: grid; position: fixed; top: 120px; left: 12px; bottom: 12px; width: 260px; z-index: 40;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .18); }
+  .wb .bd-right { position: fixed; top: auto; left: 12px; right: 12px; bottom: 12px; width: auto; max-height: 45dvh;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .18); }
+  .wb .rail-toggle { display: inline-block; }
 }
 .wb .bd-left, .wb .bd-right { display: grid; gap: 8px; background: var(--wb-panel); border: 1px solid var(--wb-border);
   border-radius: 12px; padding: 10px; font-size: 13px; max-height: calc(100dvh - 190px); overflow: auto; align-content: start; }
@@ -146,5 +158,155 @@
   max-height: 420px; overflow: auto; }
 .wb .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12px; margin: 6px 0 0; }
 .wb .facts dt { color: var(--wb-dim); } .wb .facts dd { margin: 0; word-break: break-all; }
+/* menu icon browser (MenuInspector): inline glyph grid opened by the Browse toggle */
+.wb .ic-row { display: flex; gap: 8px; align-items: flex-end; }
+.wb .ic-row .lnk { padding-bottom: 5px; white-space: nowrap; }
+.wb .icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 4px;
+  border: 1px solid var(--wb-border); border-radius: 10px; background: var(--wb-bg); padding: 6px; }
+.wb .icon-cell { height: 34px; display: grid; place-items: center; font-size: 18px; cursor: pointer;
+  border: 1px solid var(--wb-border); border-radius: 8px; background: var(--wb-panel); color: var(--wb-text); }
+.wb .icon-cell:hover { border-color: var(--wb-accent); }
+.wb .icon-cell.sel { background: color-mix(in srgb, var(--wb-accent) 16%, transparent); border-color: var(--wb-accent); }
 .wb .findings { display: grid; gap: 4px; font-size: 12px; }
 .wb .row-b { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* ================= portal builder redesign (§4) ================= */
+
+/* -- lifecycle pill (§4.1) */
+.wb .pill { padding: 3px 10px; border-radius: 99px; font-size: 12px; border: 1px solid var(--wb-border); background: var(--wb-panel-2); }
+.wb .pill.p-ok { color: var(--wb-ok); border-color: var(--wb-ok); }
+.wb .pill.p-warn { color: var(--wb-warn); border-color: var(--wb-warn); }
+.wb .pill.p-bad { color: var(--wb-bad); border-color: var(--wb-bad); }
+.wb .pill.p-neutral { color: var(--wb-dim); }
+.wb .badge.warn-b { color: var(--wb-warn); }
+.wb .locknote { margin-top: 4px; }
+
+/* -- ⋯ overflow menu (§4.9) */
+.wb .ovm { position: relative; }
+.wb .ovm-list { position: absolute; right: 0; top: 36px; z-index: 60; display: grid; min-width: 180px; padding: 6px;
+  background: var(--wb-panel-2); border: 1px solid var(--wb-border); border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.18); }
+.wb .ovm-item { text-align: left; padding: 7px 10px; border: 0; background: none; color: var(--wb-text); font: inherit; cursor: pointer; border-radius: 8px; }
+.wb .ovm-item:hover { background: var(--wb-field); }
+.wb .ovm-item.bad { color: var(--wb-bad); }
+
+/* -- first-run chooser (§4.1) */
+.wb .start { display: grid; gap: 18px; max-width: 720px; }
+.wb .start-greet h2 { margin: 0 0 4px; }
+.wb .start-greet p { margin: 0 0 10px; color: var(--wb-dim); max-width: 60ch; }
+.wb .start-steps { margin: 0; padding: 0 0 0 22px; color: var(--wb-dim); font-size: 12.5px; }
+.wb .start-cards { display: grid; gap: 10px; }
+.wb .start-card { display: grid; gap: 3px; text-align: left; padding: 14px 16px; border: 1px solid var(--wb-border-strong);
+  border-radius: 12px; background: var(--wb-panel); color: var(--wb-text); font: inherit; cursor: pointer; }
+.wb .start-card.primary-click { border-color: var(--wb-accent); }
+.wb .start-card:hover { background: var(--wb-field); }
+
+/* -- navigation rail (§4.2) — looks like the portal sidebar, edits the real thing */
+.wb .rail { display: grid; gap: 6px; align-content: start; }
+.wb .rail-scroll { display: grid; gap: 2px; min-height: 200px; }
+.wb .rail-hint { padding: 0 6px 6px; }
+.wb .rail-m-wrap { display: grid; }
+.wb .rail-m { display: flex; gap: 4px; align-items: center; padding: 6px 6px; border-radius: 8px; cursor: pointer; }
+.wb .rail-m:hover, .wb .rail-page:hover { background: var(--wb-field); }
+.wb .rail-m.sel, .wb .rail-page.sel { background: var(--wb-panel-2); outline: 1px solid var(--wb-accent); }
+.wb .rail-m .lbl, .wb .rail-page .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb .rail-m .lbl.locked, .wb .rail-page .lbl.locked { color: var(--wb-dim); }
+.wb .rail-chev { border: 0; background: none; color: var(--wb-dim); cursor: pointer; width: 18px; padding: 0; }
+.wb .rail-ic { font-size: 13px; width: 18px; text-align: center; }
+.wb .rail-lock { margin-left: 4px; font-size: 10px; }
+.wb .m-dot { font-size: 11px; cursor: help; }
+.wb .m-dot.bad { color: var(--wb-bad); } .wb .m-dot.warn { color: var(--wb-warn); }
+.wb .rail-plus { border: 0; background: none; cursor: pointer; padding: 0 4px; visibility: hidden; }
+.wb .rail-m:hover .rail-plus, .wb .rail-plus:focus-visible { visibility: visible; }
+.wb .rail-pages { display: grid; gap: 2px; margin: 0 0 4px 14px; border-left: 1px solid var(--wb-border); padding-left: 6px; }
+.wb .rail-page { display: flex; gap: 6px; align-items: center; padding: 5px 6px; border-radius: 8px; cursor: pointer; font-size: 13.5px; }
+.wb .rail-page.hint { color: var(--wb-dim); font-size: 12px; cursor: default; }
+.wb .rail-count { min-width: 16px; text-align: right; }
+.wb .row-x { border: 0; background: none; color: var(--wb-dim); cursor: pointer; padding: 0 3px; visibility: hidden; }
+.wb .row-x:hover { color: var(--wb-bad); }
+.wb .rail-page:hover .row-x, .wb .row-x:focus-visible { visibility: visible; }
+.wb .rail-edit { height: 24px; min-width: 0; width: 100%; font: inherit; }
+.wb .rail-add { justify-self: start; padding: 4px 8px; }
+.wb .rail-checks { border-top: 1px solid var(--wb-border); padding-top: 6px; display: grid; gap: 4px; }
+
+/* -- device tier segmented control (§4.3) */
+.wb .seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--wb-border); border-radius: 99px; background: var(--wb-panel-2); }
+.wb .seg-btn { border: 0; background: none; color: var(--wb-dim); font: inherit; font-size: 12px; padding: 3px 12px; border-radius: 99px; cursor: pointer; }
+.wb .seg-btn.on { background: var(--wb-accent); color: var(--wb-ink); font-weight: 650; }
+
+/* -- true-width canvas (§4.3) */
+.wb .cv-scroll { overflow-x: auto; }
+.wb .cv-scroll .cv-page { margin-bottom: 6px; }
+.wb .cv-bar .btn { height: 26px; padding: 0 10px; font-size: 12px; }
+
+/* -- per-slot add chips (§4.4) */
+.wb .slot-chip { position: absolute; left: -10px; top: 50%; transform: translateY(-50%); z-index: 5; width: 20px; height: 20px;
+  border-radius: 50%; border: 1px solid var(--wb-border-strong); background: var(--wb-panel-2); color: var(--wb-text);
+  cursor: pointer; padding: 0; visibility: hidden; font: inherit; line-height: 1; }
+.wb .cv-cell:hover .slot-chip, .wb .slot-chip:focus-visible { visibility: visible; }
+.wb .cv-end { grid-column: 1 / -1; z-index: 1; border: 1px dashed var(--wb-border-strong); border-radius: 10px;
+  background: none; color: var(--wb-dim); cursor: pointer; padding: 10px; font: inherit; }
+.wb .cv-end:hover { color: var(--wb-accent); border-color: var(--wb-accent); }
+.wb .cv-empty { grid-column: 1 / -1; display: grid; place-items: center; gap: 10px; min-height: 240px; color: var(--wb-dim); z-index: 1; }
+.wb .cv-empty p { margin: 0; }
+
+/* -- add-widget drawer (§4.4) */
+.wb .picker-backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(0, 0, 0, .25); display: flex; justify-content: flex-end; }
+.wb .picker { width: min(420px, 92vw); height: 100dvh; box-sizing: border-box; display: grid; gap: 8px; padding: 14px;
+  background: var(--wb-panel); border-left: 1px solid var(--wb-border); grid-template-rows: auto 1fr auto; }
+.wb .picker-h { display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px; align-items: center; }
+.wb .picker-body { overflow-y: auto; display: grid; gap: 10px; align-content: start; }
+.wb .pick { display: grid; gap: 2px; text-align: left; padding: 8px 10px; border: 1px solid var(--wb-border);
+  border-radius: 10px; background: var(--wb-bg); color: var(--wb-text); font: inherit; cursor: pointer; }
+.wb .pick.on { border-color: var(--wb-accent); }
+.wb .pick.on b { color: var(--wb-accent); }
+.wb .pick-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb .picker-f { padding-top: 4px; border-top: 1px solid var(--wb-border); }
+
+/* -- submit sheet (§4.6) */
+.wb .sheet-backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(0, 0, 0, .25); display: flex; justify-content: flex-end; }
+.wb .sheet { width: min(520px, 94vw); height: 100dvh; box-sizing: border-box; overflow-y: auto; display: grid; gap: 12px;
+  align-content: start; padding: 16px; background: var(--wb-panel); border-left: 1px solid var(--wb-border); }
+.wb .sheet-sec { display: grid; gap: 5px; padding: 10px 12px; border: 1px solid var(--wb-border); border-radius: 10px; }
+.wb .sheet-diff { max-height: 16em; overflow: auto; font-size: 10.5px; border-radius: 8px; }
+
+/* -- confirm dialog + toast (§4.8) */
+.wb .dlg-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(0, 0, 0, .35); display: grid; place-items: center; }
+.wb .dlg { width: min(440px, 92vw); display: grid; gap: 10px; padding: 18px; background: var(--wb-panel-2);
+  border: 1px solid var(--wb-border); border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+.wb .dlg h3 { margin: 0; font-size: 16px; }
+.wb .dlg p { margin: 0; color: var(--wb-dim); }
+.wb .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.wb .btn.danger { background: var(--wb-bad); border-color: var(--wb-bad); color: var(--color-status-danger-ink, #fff); font-weight: 650; }
+.wb .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 90; display: flex; gap: 12px;
+  align-items: center; padding: 10px 16px; background: var(--wb-panel-2); border: 1px solid var(--wb-border-strong);
+  border-radius: 99px; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
+
+/* -- accessibility: visible keyboard focus everywhere + a skip link (ui-std a11y bar) */
+.wb :is(a, button, input, select, textarea, summary, [tabindex="0"]):focus-visible {
+  outline: 2px solid var(--wb-accent-strong, var(--portal-accent, #2563eb));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.wb .skip { position: absolute; left: 8px; top: -48px; z-index: 100; padding: 8px 14px; background: var(--wb-panel-2);
+  border: 1px solid var(--wb-border-strong); border-radius: 0 0 10px 10px; transition: top .15s ease; }
+.wb .skip:focus { top: 0; }
+.wb .main:focus-visible { outline: none; }
+
+/* -- registry: keep the column headers visible while scrolling the 18-row table */
+.wb table thead th { position: sticky; top: 0; z-index: 2; background: var(--wb-panel-2); }
+
+/* -- workbench focus mode (§4.7): builder routes collapse the nav behind ☰ */
+.wb.focus { grid-template-columns: 52px minmax(0, 1fr); }
+.wb.focus .side { padding: 16px 6px; }
+.wb .nav-btn { border: 0; background: none; color: var(--wb-text); font: inherit; font-size: 12.5px; cursor: pointer;
+  text-align: left; padding: 6px 10px; border-radius: 8px; }
+.wb .nav-btn:hover { background: var(--wb-panel-2); }
+.wb.focus .nav-btn { text-align: center; padding: 6px 4px; }
+.wb .nav-ic { display: none; }
+.wb.focus .nav-ic { display: inline; }
+.wb.focus .nav-l { position: absolute; width: 0; height: 0; overflow: hidden; clip-path: inset(50%); }
+.wb.focus .nav { text-align: center; position: relative; display: block; }
+.wb.focus .brand { font-size: 11px; margin-bottom: 10px; }
+.wb.focus .brand b { font-size: 12px; }
+.wb.focus .foot { display: none; }
+.wb .rail-toggle { display: none; }

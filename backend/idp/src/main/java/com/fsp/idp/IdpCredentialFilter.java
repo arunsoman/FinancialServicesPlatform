@@ -40,7 +40,8 @@ public class IdpCredentialFilter extends OncePerRequestFilter {
             String path = request.getRequestURI();
             if (path.startsWith("/idp/policy")) {
                 String credential = request.getHeader("X-FSP-Internal-Credential");
-                if (credential == null || !credential.equals(props.getInternalCredential())) {
+                if (props.getInternalCredential() == null || props.getInternalCredential().isBlank()
+                    || credential == null || !constantTimeEquals(credential, props.getInternalCredential())) {
                     log.warn("idp_internal_hop_rejected path={}", path);
                     response.setStatus(401);
                     response.setContentType("application/json");
@@ -57,5 +58,11 @@ public class IdpCredentialFilter extends OncePerRequestFilter {
         } finally {
             MDC.clear();
         }
+    }
+    /** Constant-time comparison — never leak the secret through response timing. */
+    private static boolean constantTimeEquals(String given, String expected) {
+        return java.security.MessageDigest.isEqual(
+            given.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            expected.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 }

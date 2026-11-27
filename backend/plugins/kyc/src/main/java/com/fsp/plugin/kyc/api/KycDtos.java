@@ -16,7 +16,9 @@ public final class KycDtos {
         UUID caseId, String caseNo, UUID subjectTenantId, String legalName, String dbaName,
         String subType, String registrationNumber, String status, String riskRating,
         Instant submittedAt, LocalDate nextReviewDate, String makerName, Instant updatedAt, long version,
-        boolean stalled
+        boolean stalled,
+        // V2: ORGANIZATION | CUSTOMER; for customers whether they completed activation
+        String caseKind, String primaryContact, Boolean contactVerified
     ) {}
 
     public record CaseListResponse(
@@ -38,8 +40,15 @@ public final class KycDtos {
         UUID approvalId, Long approvalRev, UUID makerPersonId, String makerName, UUID checkerPersonId,
         Instant submittedAt, Instant createdAt, Instant updatedAt, long version, boolean stalled, boolean piiMasked,
         boolean canDecide, String blockedReason,
-        List<CheckView> checks, List<UboView> ubos, List<BankAccountView> bankAccounts
+        List<CheckView> checks, List<UboView> ubos, List<BankAccountView> bankAccounts,
+        // V2: CUSTOMER cases carry the individual (null for organizations)
+        String caseKind, CustomerView customer
     ) {}
+
+    /** The individual on a CUSTOMER case. Contacts are masked; contactVerified gates approval. */
+    public record CustomerView(UUID personId, String firstName, String lastName, String gender,
+                               LocalDate dateOfBirth, String email, String phone, String primaryContact,
+                               boolean contactVerified, Instant contactVerifiedAt, Instant activationSentAt) {}
 
     public record CheckView(UUID checkId, String checkType, String result, String details,
                             boolean simulated, Instant checkedAt) {}
@@ -62,8 +71,27 @@ public final class KycDtos {
         String operationalPostal,
         List<UboRequest> ubos,
         List<BankAccountRequest> bankAccounts,
+        /** V2: who runs the new organization — each activates by link/code on their primary contact. */
+        ContactRequest admin, ContactRequest checker,
+        /** REFUSED when present (400 SCREENING_NOT_CLIENT_SETTABLE) — kept only so a client that
+         *  still sends it is told so, instead of the field being silently ignored. */
         String screeningOutcome
     ) {}
+
+    /** V2: an org-born person (administrator / checker) — the activation goes to primaryContact. */
+    public record ContactRequest(String fullName, String email, String phone, String primaryContact) {}
+
+    /** V2: staff-entered customer registration (Customer Registration, step 1 of 2). No password:
+     *  the customer sets it from the activation sent to the primary contact (step 2 = checker). */
+    public record CreateCustomerRequest(String firstName, String lastName, String gender, LocalDate dateOfBirth,
+                                        String phone, String email, String primaryContact,
+                                        AddressRequest residentialAddress, Boolean postalSameAsResidential,
+                                        AddressRequest postalAddress) {}
+
+    /** A Namibian address, as the organization application captures it (region from the REGION master). */
+    public record AddressRequest(String line, String city, String region, String postalCode) {}
+
+    public record ActivationResent(UUID caseId, List<String> channels) {}
 
     public record UboRequest(
         String fullName, LocalDate dob, String nationality, String residentialAddress,

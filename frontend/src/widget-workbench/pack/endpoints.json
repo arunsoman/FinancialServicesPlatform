@@ -1,5 +1,5 @@
 {
-  "digest": "bad5e163be3cf35e7f7a7dfaa513699748dd6e150ae14327f098f0eb5ed761d1",
+  "digest": "38b705f94c62cc625bc7be7a4a35c5d6902e35aec0a3412117f097fb1e271264",
   "endpoints": [
     {
       "id": "approval.queue.read",
@@ -8,6 +8,14 @@
       "permission": "",
       "risk": "READ",
       "title": "View approval queue"
+    },
+    {
+      "id": "approval.read",
+      "method": "GET",
+      "path": "/api/approvals/{id}",
+      "permission": "",
+      "risk": "READ",
+      "title": "View one approval request"
     },
     {
       "id": "approval.resolve.approve",
@@ -26,12 +34,116 @@
       "title": "Reject request (four-eyes)"
     },
     {
+      "id": "rbac.menu.me",
+      "method": "GET",
+      "path": "/api/me/menu-access",
+      "permission": "",
+      "risk": "READ",
+      "title": "My menu access on a portal"
+    },
+    {
       "id": "rbac.permission.me",
       "method": "GET",
       "path": "/api/me/permissions",
       "permission": "",
       "risk": "READ",
       "title": "My effective permissions"
+    },
+    {
+      "id": "notification.list",
+      "method": "GET",
+      "path": "/api/notifications",
+      "permission": "notification.view",
+      "risk": "READ",
+      "title": "Read the notification inbox"
+    },
+    {
+      "id": "notification.dismiss",
+      "method": "POST",
+      "path": "/api/notifications/{id}/dismiss",
+      "permission": "notification.view",
+      "risk": "WRITE",
+      "title": "Dismiss an informational notification"
+    },
+    {
+      "id": "notification.read",
+      "method": "POST",
+      "path": "/api/notifications/{id}/read",
+      "permission": "notification.view",
+      "risk": "WRITE",
+      "title": "Mark one notification read"
+    },
+    {
+      "id": "notification.snooze",
+      "method": "POST",
+      "path": "/api/notifications/{id}/snooze",
+      "permission": "notification.view",
+      "risk": "WRITE",
+      "title": "Snooze one of your notifications"
+    },
+    {
+      "id": "notification.wake",
+      "method": "POST",
+      "path": "/api/notifications/{id}/wake",
+      "permission": "notification.view",
+      "risk": "WRITE",
+      "title": "Bring a snoozed notification back now"
+    },
+    {
+      "id": "notification.channels.read",
+      "method": "GET",
+      "path": "/api/notifications/channels",
+      "permission": "notification.view",
+      "risk": "READ",
+      "title": "Read your email/SMS notification channels"
+    },
+    {
+      "id": "notification.channels.update",
+      "method": "PUT",
+      "path": "/api/notifications/channels",
+      "permission": "notification.view",
+      "risk": "WRITE",
+      "title": "Opt in/out of email/SMS notification channels"
+    },
+    {
+      "id": "notification.push.config",
+      "method": "GET",
+      "path": "/api/notifications/push/config",
+      "permission": "notification.view",
+      "risk": "READ",
+      "title": "Read the push channel configuration"
+    },
+    {
+      "id": "notification.push.subscribe",
+      "method": "POST",
+      "path": "/api/notifications/push/subscriptions",
+      "permission": "notification.view",
+      "risk": "WRITE",
+      "title": "Register a push device for your identity"
+    },
+    {
+      "id": "notification.push.unsubscribe",
+      "method": "DELETE",
+      "path": "/api/notifications/push/subscriptions/{endpoint}",
+      "permission": "notification.view",
+      "risk": "WRITE",
+      "title": "Retire a push device for your identity"
+    },
+    {
+      "id": "notification.read-all",
+      "method": "POST",
+      "path": "/api/notifications/read-all",
+      "permission": "notification.view",
+      "risk": "WRITE",
+      "title": "Mark all notifications read"
+    },
+    {
+      "id": "notification.unread-count",
+      "method": "GET",
+      "path": "/api/notifications/unread-count",
+      "permission": "notification.view",
+      "risk": "READ",
+      "title": "Read the pending notification count"
     },
     {
       "id": "rbac.permission.catalog",
@@ -56,6 +168,150 @@
       "permission": "plugin.manage",
       "risk": "FOUR_EYES",
       "title": "Suspend/deactivate a plugin installation (four-eyes)"
+    },
+    {
+      "id": "inventory.digital.product.list",
+      "method": "GET",
+      "path": "/api/plugins/inventory/digital-products",
+      "permission": "digital.view",
+      "risk": "READ",
+      "title": "inventory plugin: inventory.digital.product.list"
+    },
+    {
+      "id": "inventory.digital.product.create",
+      "method": "POST",
+      "path": "/api/plugins/inventory/digital-products",
+      "permission": "digital.product.manage",
+      "risk": "WRITE",
+      "title": "inventory plugin: inventory.digital.product.create"
+    },
+    {
+      "id": "inventory.float.deposit.list",
+      "method": "GET",
+      "path": "/api/plugins/inventory/float-deposits",
+      "permission": "digital.view",
+      "risk": "READ",
+      "title": "inventory plugin: inventory.float.deposit.list"
+    },
+    {
+      "id": "inventory.float.deposit.create",
+      "method": "POST",
+      "path": "/api/plugins/inventory/float-deposits",
+      "permission": "digital.float.deposit",
+      "risk": "WRITE",
+      "title": "inventory plugin: inventory.float.deposit.create"
+    },
+    {
+      "id": "inventory.float.deposit.decide",
+      "method": "POST",
+      "path": "/api/plugins/inventory/float-deposits/{depositId}/decision",
+      "permission": "digital.float.deposit",
+      "risk": "WRITE",
+      "title": "inventory plugin: inventory.float.deposit.decide"
+    },
+    {
+      "id": "inventory.sku.list",
+      "method": "GET",
+      "path": "/api/plugins/inventory/skus",
+      "permission": "inventory.view",
+      "risk": "READ",
+      "title": "inventory plugin: inventory.sku.list"
+    },
+    {
+      "id": "inventory.sku.create",
+      "method": "POST",
+      "path": "/api/plugins/inventory/skus",
+      "permission": "inventory.sku.manage",
+      "risk": "WRITE",
+      "title": "inventory plugin: inventory.sku.create"
+    },
+    {
+      "id": "inventory.sku.get",
+      "method": "GET",
+      "path": "/api/plugins/inventory/skus/{skuId}",
+      "permission": "inventory.view",
+      "risk": "READ",
+      "title": "inventory plugin: inventory.sku.get"
+    },
+    {
+      "id": "inventory.sku.decide",
+      "method": "POST",
+      "path": "/api/plugins/inventory/skus/{skuId}/pricing-decision",
+      "permission": "inventory.pricing.approve",
+      "risk": "WRITE",
+      "title": "inventory plugin: inventory.sku.decide"
+    },
+    {
+      "id": "inventory.stock.batch.list",
+      "method": "GET",
+      "path": "/api/plugins/inventory/stock-batches",
+      "permission": "inventory.view",
+      "risk": "READ",
+      "title": "inventory plugin: inventory.stock.batch.list"
+    },
+    {
+      "id": "inventory.stock.batch.create",
+      "method": "POST",
+      "path": "/api/plugins/inventory/stock-batches",
+      "permission": "inventory.stock.upload",
+      "risk": "WRITE",
+      "title": "inventory plugin: inventory.stock.batch.create"
+    },
+    {
+      "id": "inventory.stock.batch.get",
+      "method": "GET",
+      "path": "/api/plugins/inventory/stock-batches/{batchId}",
+      "permission": "inventory.view",
+      "risk": "READ",
+      "title": "inventory plugin: inventory.stock.batch.get"
+    },
+    {
+      "id": "inventory.stock.batch.decide",
+      "method": "POST",
+      "path": "/api/plugins/inventory/stock-batches/{batchId}/decision",
+      "permission": "inventory.stock.approve",
+      "risk": "WRITE",
+      "title": "inventory plugin: inventory.stock.batch.decide"
+    },
+    {
+      "id": "inventory.voucher.batch.list",
+      "method": "GET",
+      "path": "/api/plugins/inventory/voucher-batches",
+      "permission": "digital.view",
+      "risk": "READ",
+      "title": "inventory plugin: inventory.voucher.batch.list"
+    },
+    {
+      "id": "inventory.voucher.batch.upload",
+      "method": "POST",
+      "path": "/api/plugins/inventory/voucher-batches",
+      "permission": "digital.voucher.upload",
+      "risk": "WRITE",
+      "title": "inventory plugin: inventory.voucher.batch.upload"
+    },
+    {
+      "id": "inventory.voucher.batch.get",
+      "method": "GET",
+      "path": "/api/plugins/inventory/voucher-batches/{batchId}",
+      "permission": "digital.view",
+      "risk": "READ",
+      "title": "inventory plugin: inventory.voucher.batch.get"
+    },
+    {
+      "id": "inventory.voucher.batch.authorize",
+      "method": "POST",
+      "path": "/api/plugins/inventory/voucher-batches/{batchId}/authorization",
+      "permission": "digital.voucher.authorize",
+      "risk": "WRITE",
+      "title": "inventory plugin: inventory.voucher.batch.authorize"
+    },
+    {
+      "id": "inventory.voucher.dispense",
+      "method": "POST",
+      "path": "/api/plugins/inventory/vouchers/dispense",
+      "permission": "digital.dispense",
+      "risk": "WRITE",
+      "title": "inventory plugin: inventory.voucher.dispense"
     },
     {
       "id": "kyc.case.list",
@@ -90,6 +346,14 @@
       "title": "kyc plugin: kyc.case.update"
     },
     {
+      "id": "kyc.case.activation",
+      "method": "POST",
+      "path": "/api/plugins/kyc/cases/{caseId}/activation",
+      "permission": "org.onboard_child",
+      "risk": "WRITE",
+      "title": "kyc plugin: kyc.case.activation"
+    },
+    {
       "id": "kyc.case.decide",
       "method": "POST",
       "path": "/api/plugins/kyc/cases/{caseId}/decisions",
@@ -112,6 +376,14 @@
       "permission": "org.onboard_child",
       "risk": "WRITE",
       "title": "kyc plugin: kyc.case.submit"
+    },
+    {
+      "id": "kyc.customer.create",
+      "method": "POST",
+      "path": "/api/plugins/kyc/customers",
+      "permission": "org.onboard_child",
+      "risk": "WRITE",
+      "title": "kyc plugin: kyc.customer.create"
     },
     {
       "id": "kyc.master.list",
@@ -138,6 +410,22 @@
       "title": "kyc plugin: kyc.org.get"
     },
     {
+      "id": "recon.page",
+      "method": "POST",
+      "path": "/api/recon/pages",
+      "permission": "",
+      "risk": "WRITE",
+      "title": "Page on recon invariant violation"
+    },
+    {
+      "id": "tenant.create.psp",
+      "method": "POST",
+      "path": "/api/tenants",
+      "permission": "org.create",
+      "risk": "WRITE",
+      "title": "Create PSP organization"
+    },
+    {
       "id": "tenant.subtree.read",
       "method": "GET",
       "path": "/api/tenants/{id}/subtree",
@@ -146,12 +434,36 @@
       "title": "List tenant subtree (organizations API)"
     },
     {
+      "id": "tenant.detail.read",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}",
+      "permission": "",
+      "risk": "READ",
+      "title": "View tenant detail"
+    },
+    {
       "id": "audit.list",
       "method": "GET",
       "path": "/api/tenants/{tenantId}/audit",
       "permission": "audit.view",
       "risk": "READ",
       "title": "View audit trail"
+    },
+    {
+      "id": "bank.account.list",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/bank-accounts",
+      "permission": "bank.account.view",
+      "risk": "READ",
+      "title": "List an organization's settlement bank accounts"
+    },
+    {
+      "id": "bank.account.create",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/bank-accounts",
+      "permission": "bank.account.create",
+      "risk": "FOUR_EYES",
+      "title": "Request a settlement bank account"
     },
     {
       "id": "ledger.book.list",
@@ -186,6 +498,14 @@
       "title": "Live GL balance from TigerBeetle"
     },
     {
+      "id": "ledger.coa.ensure",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/books/{bookId}/gl-accounts/ensure",
+      "permission": "gl.account.create",
+      "risk": "WRITE",
+      "title": "Ensure additively-provisioned GL accounts"
+    },
+    {
       "id": "ledger.period.list",
       "method": "GET",
       "path": "/api/tenants/{tenantId}/books/{bookId}/periods",
@@ -200,6 +520,174 @@
       "permission": "gl.account.create",
       "risk": "WRITE",
       "title": "Provision default chart of accounts"
+    },
+    {
+      "id": "org.branch.list",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/branches",
+      "permission": "",
+      "risk": "READ",
+      "title": "List an organization's branches"
+    },
+    {
+      "id": "org.branch.create",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/branches",
+      "permission": "role.manage",
+      "risk": "FOUR_EYES",
+      "title": "Request a new branch (four-eyes)"
+    },
+    {
+      "id": "org.branch.delete",
+      "method": "DELETE",
+      "path": "/api/tenants/{tenantId}/branches/{branchId}",
+      "permission": "role.manage",
+      "risk": "FOUR_EYES",
+      "title": "Request a branch deletion (four-eyes)"
+    },
+    {
+      "id": "org.branch.get",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/branches/{branchId}",
+      "permission": "role.view",
+      "risk": "READ",
+      "title": "Read one branch"
+    },
+    {
+      "id": "org.branch.update",
+      "method": "PATCH",
+      "path": "/api/tenants/{tenantId}/branches/{branchId}",
+      "permission": "role.manage",
+      "risk": "FOUR_EYES",
+      "title": "Request a branch rename (four-eyes)"
+    },
+    {
+      "id": "tenant.children.read",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/children",
+      "permission": "",
+      "risk": "READ",
+      "title": "List tenant children"
+    },
+    {
+      "id": "tenant.children.page",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/children/page",
+      "permission": "",
+      "risk": "READ",
+      "title": "Page tenant children"
+    },
+    {
+      "id": "customer.create",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/customers",
+      "permission": "org.onboard_child",
+      "risk": "WRITE",
+      "title": "Onboard a customer (KYC saga, delegated) — activation goes to the primary contact"
+    },
+    {
+      "id": "customer.get",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/customers/{personId}",
+      "permission": "kyc.review",
+      "risk": "READ",
+      "title": "One onboarded customer: status and whether the contact is verified"
+    },
+    {
+      "id": "customer.verification.record",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/customers/{personId}/verification",
+      "permission": "plugin.manage",
+      "risk": "WRITE",
+      "title": "Record a customer KYC verdict (machine-only); VERIFIED activates a contact-verified customer"
+    },
+    {
+      "id": "org.department.list",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/departments",
+      "permission": "",
+      "risk": "READ",
+      "title": "List an organization's departments"
+    },
+    {
+      "id": "billing.invoices.list",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices",
+      "permission": "invoice.view",
+      "risk": "READ",
+      "title": "List an organization's sales or purchase invoices"
+    },
+    {
+      "id": "billing.invoices.create",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices",
+      "permission": "invoice.create",
+      "risk": "WRITE",
+      "title": "Draft an invoice"
+    },
+    {
+      "id": "billing.invoices.get",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}",
+      "permission": "invoice.view",
+      "risk": "READ",
+      "title": "View an invoice"
+    },
+    {
+      "id": "billing.invoices.issue",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/issue",
+      "permission": "invoice.create",
+      "risk": "WRITE",
+      "title": "Issue a draft invoice to the buyer"
+    },
+    {
+      "id": "billing.invoices.options",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/payment-options",
+      "permission": "invoice.pay",
+      "risk": "READ",
+      "title": "Ways the buyer can pay an invoice"
+    },
+    {
+      "id": "billing.invoices.pay",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/payments",
+      "permission": "invoice.pay",
+      "risk": "WRITE",
+      "title": "Pay a received invoice (wallet or bank transfer)"
+    },
+    {
+      "id": "billing.invoices.confirm",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/payments/{paymentId}/confirm",
+      "permission": "invoice.collect",
+      "risk": "WRITE",
+      "title": "Confirm a bank transfer for an invoice arrived"
+    },
+    {
+      "id": "billing.invoices.void",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/invoices/{invoiceId}/void",
+      "permission": "invoice.void",
+      "risk": "FOUR_EYES",
+      "title": "Void an invoice (issued invoices need a second person)"
+    },
+    {
+      "id": "billing.invoices.counterparties",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/counterparties",
+      "permission": "invoice.create",
+      "risk": "READ",
+      "title": "Organizations this one may invoice"
+    },
+    {
+      "id": "billing.invoices.summary",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/invoices/summary",
+      "permission": "invoice.view",
+      "risk": "READ",
+      "title": "Totals of an organization's open invoices"
     },
     {
       "id": "journal.entry.search",
@@ -258,12 +746,132 @@
       "title": "Uncertain postings queue"
     },
     {
+      "id": "journal.entry.post_intent",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/journal/intents",
+      "permission": "je.post.immediate",
+      "risk": "WRITE",
+      "title": "Post journal intent immediately"
+    },
+    {
+      "id": "person.activation.resend",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/persons/{personId}/activation",
+      "permission": "org.onboard_child",
+      "risk": "WRITE",
+      "title": "Re-send a person's activation (link or code) to their primary contact"
+    },
+    {
+      "id": "plugin.installation.list",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/plugins",
+      "permission": "plugin.manage",
+      "risk": "READ",
+      "title": "List an organization's plugin installations"
+    },
+    {
       "id": "plugin.install",
       "method": "POST",
       "path": "/api/tenants/{tenantId}/plugins",
       "permission": "plugin.install",
       "risk": "FOUR_EYES",
       "title": "Install a plugin on a tenant (four-eyes)"
+    },
+    {
+      "id": "role.list",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/roles",
+      "permission": "role.view",
+      "risk": "READ",
+      "title": "List an organization's roles"
+    },
+    {
+      "id": "role.create",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/roles",
+      "permission": "role.manage",
+      "risk": "FOUR_EYES",
+      "title": "Request a new role (four-eyes)"
+    },
+    {
+      "id": "role.delete",
+      "method": "DELETE",
+      "path": "/api/tenants/{tenantId}/roles/{roleId}",
+      "permission": "role.manage",
+      "risk": "FOUR_EYES",
+      "title": "Request a role deletion (four-eyes)"
+    },
+    {
+      "id": "role.get",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/roles/{roleId}",
+      "permission": "role.view",
+      "risk": "READ",
+      "title": "Read one role"
+    },
+    {
+      "id": "role.update",
+      "method": "PATCH",
+      "path": "/api/tenants/{tenantId}/roles/{roleId}",
+      "permission": "role.manage",
+      "risk": "FOUR_EYES",
+      "title": "Request a role permission change (four-eyes)"
+    },
+    {
+      "id": "sku.order.history",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/sku-orders",
+      "permission": "",
+      "risk": "READ",
+      "title": "List SKU orders"
+    },
+    {
+      "id": "sku.order.charge",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/sku-orders",
+      "permission": "",
+      "risk": "WRITE",
+      "title": "Create a SKU order and charge the wallet (linked hold)"
+    },
+    {
+      "id": "sku.order.view",
+      "method": "GET",
+      "path": "/api/tenants/{tenantId}/sku-orders/{orderId}",
+      "permission": "",
+      "risk": "READ",
+      "title": "View a SKU order"
+    },
+    {
+      "id": "sku.order.cancel",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/sku-orders/{orderId}/cancel",
+      "permission": "",
+      "risk": "WRITE",
+      "title": "Cancel a SKU order (release the charge hold)"
+    },
+    {
+      "id": "sku.order.confirm",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/sku-orders/{orderId}/confirm",
+      "permission": "",
+      "risk": "WRITE",
+      "title": "Confirm a SKU order (commits the charge)"
+    },
+    {
+      "id": "sku.order.mirror",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/sku-orders/{orderId}/mirror-journal",
+      "permission": "",
+      "risk": "WRITE",
+      "title": "Post the mirror JE (price fingerprint audit)"
+    },
+    {
+      "id": "sku.order.sync",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/sku-orders/{orderId}/sync",
+      "permission": "",
+      "risk": "WRITE",
+      "title": "Sync order state from EMI money truth"
     },
     {
       "id": "user.role.options",
@@ -322,12 +930,28 @@
       "title": "Activate organization user"
     },
     {
+      "id": "user.activation.resend",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/users/{personId}/activation",
+      "permission": "user.manage",
+      "risk": "WRITE",
+      "title": "Re-send a user's activation to their primary contact"
+    },
+    {
       "id": "user.deactivate",
       "method": "POST",
       "path": "/api/tenants/{tenantId}/users/{personId}/deactivate",
       "permission": "user.manage",
       "risk": "WRITE",
       "title": "Deactivate organization user"
+    },
+    {
+      "id": "user.password.reset.request",
+      "method": "POST",
+      "path": "/api/tenants/{tenantId}/users/{personId}/password-reset-request",
+      "permission": "user.manage",
+      "risk": "WRITE",
+      "title": "Request admin-initiated password reset (four-eyes)"
     }
   ]
 }

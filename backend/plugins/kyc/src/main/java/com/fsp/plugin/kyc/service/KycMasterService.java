@@ -55,11 +55,22 @@ public class KycMasterService {
                 "Erongo", "Hardap", "Karas", "Kavango East", "Kavango West", "Khomas", "Kunene",
                 "Ohangwena", "Omaheke", "Omusati", "Oshana", "Oshikoto", "Otjozondjupa", "Zambezi")
             .map(r -> new KycDtos.MasterValue("REGION", r.toUpperCase().replace(' ', '_'), r)).toList());
+        MASTER_DATA.put("GENDER", List.of(
+            new KycDtos.MasterValue("GENDER", "FEMALE", "Female"),
+            new KycDtos.MasterValue("GENDER", "MALE", "Male"),
+            new KycDtos.MasterValue("GENDER", "OTHER", "Other"),
+            new KycDtos.MasterValue("GENDER", "UNDISCLOSED", "Prefer not to say")
+        ));
         MASTER_DATA.put("ACCOUNT_TYPE", List.of(
             new KycDtos.MasterValue("ACCOUNT_TYPE", "SETTLEMENT", "Settlement"),
             new KycDtos.MasterValue("ACCOUNT_TYPE", "CURRENT", "Current / cheque"),
             new KycDtos.MasterValue("ACCOUNT_TYPE", "SAVINGS", "Savings")
         ));
+    }
+
+    /** Whether a code is in a master category (server-side validation of picklist fields). */
+    public static boolean isValid(String category, String code) {
+        return code != null && MASTER_DATA.getOrDefault(category, List.of()).stream().anyMatch(v -> v.code().equals(code));
     }
 
     public KycMasterService(KycCaseRepository caseRepository) {

@@ -11,12 +11,18 @@ export function LoginForm({ portalLabel }: { portalLabel: string }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const error = searchParams.get('error');
+  const signedOut = searchParams.get('signed_out');
 
+  // back to the portal's home after sign-in (never to this page again)
+  const home = window.location.pathname.replace(/\/login\/?$/, '') || '/';
+  const signIn = () => { window.location.href = `/bff/auth/login?return_to=${encodeURIComponent(home)}`; };
+  // A reason to tell (signed out for inactivity, session ended, sign-in failed) → stay here and say
+  // so, with a button; otherwise straight on to the IdP's hosted sign-in (PAR flow via the BFF).
+  const hold = signedOut !== null || error !== null;
   useEffect(() => {
-    // Auto-redirect to BFF login initiation (PAR flow)
-    // The BFF will redirect to IdP hosted sign-in page
-    window.location.href = `/bff/auth/login?return_to=${encodeURIComponent(window.location.pathname)}`;
-  }, [navigate]);
+    if (!hold) signIn();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hold, navigate]);
 
   return (
     <div className="grid min-h-screen place-items-center">
@@ -26,20 +32,32 @@ export function LoginForm({ portalLabel }: { portalLabel: string }) {
           <h1 className="text-2xl">{portalLabel}</h1>
         </div>
         <div className="fsp-panel p-6 text-center">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <Spinner />
-            <span className="text-sm">Redirecting to secure sign-in…</span>
-          </div>
+          {!hold && (
+            <div className="flex items-center justify-center gap-3 mb-4">
+              <Spinner />
+              <span className="text-sm">Redirecting to secure sign-in…</span>
+            </div>
+          )}
           <p className="text-dim text-xs">
-            You will be redirected to the FSP Identity Provider for authentication.
-            The browser never sends credentials to this application.
+            {hold ? 'You sign in at the FSP Identity Provider.' : 'You will be redirected to the FSP Identity Provider for authentication.'}
+            {' '}The browser never sends credentials to this application.
           </p>
+          {signedOut === 'idle' && !error && (
+            <p role="status" className="fsp-chip mt-4 block whitespace-normal text-sm">
+              You were signed out because there was no activity. Sign in again to continue.
+            </p>
+          )}
           {error && (
             <p role="alert" className="fsp-chip fsp-chip-bad mt-4 block whitespace-normal text-sm">
-              {error === 'session_expired' ? 'Session expired. Please sign in again.' :
+              {error === 'session_expired' ? 'Your session ended. Please sign in again.' :
                error === 'invalid_state' ? 'Invalid login state. Please try again.' :
                'Sign-in failed: ' + error}
             </p>
+          )}
+          {hold && (
+            <button type="button" className="fsp-btn fsp-btn-primary mt-5 w-full py-2 text-sm" data-action="session.sign-in" onClick={signIn}>
+              Sign in again
+            </button>
           )}
         </div>
       </div>

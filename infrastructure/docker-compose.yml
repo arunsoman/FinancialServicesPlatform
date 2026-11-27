@@ -111,5 +111,23 @@ services:
       postgres:
         condition: service_healthy
 
+  plugin-inventory:
+    profiles: ["stack"]
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.plugin-inventory
+    image: fsp/plugin-inventory:latest
+    container_name: fsp-plugin-inventory
+    environment:
+      FSP_PLUGIN_INVENTORY_DB_URL: jdbc:postgresql://postgres:5432/fsp_plugin_inventory
+      FSP_PLUGIN_INVENTORY_DB_USER: fsp_plugin_inventory
+      FSP_PLUGIN_INVENTORY_DB_PASSWORD: fsp_plugin_inventory
+      SERVER_PORT: 8084
+    ports:
+      - "8084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres-data:

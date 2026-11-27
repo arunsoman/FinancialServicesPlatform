@@ -52,8 +52,10 @@ public class ActAsFilter extends OncePerRequestFilter {
         }
         // Remember the home tenant before switching context.
         RequestCorrelation.setHomeTenantId(live.homeTenantId());
+        // every audit row written under this request names the session (plan C6)
+        RequestCorrelation.setActSessionId(live.id());
         Actor acting = new Actor(live.personId(), actor.username(), live.targetTenantId(),
-            Actor.ActorType.DELEGATED, null);
+            Actor.ActorType.ACTING, null);
         request.setAttribute("fsp.actor", acting);
         RequestCorrelation.setActor(acting);
         chain.doFilter(request, response);

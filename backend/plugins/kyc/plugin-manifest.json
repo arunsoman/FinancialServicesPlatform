@@ -1,8 +1,8 @@
 {
   "code": "kyc",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "KYC",
-  "description": "Know-your-customer onboarding: cases, screening, four-eyes decisions, organizations with KYC status.",
+  "description": "Know-your-customer onboarding: organization and customer cases, activation by link/code on the primary contact, screening, four-eyes decisions, organizations with KYC status.",
   "operations": [
     {
       "id": "kyc.case.list",
@@ -45,6 +45,18 @@
       "method": "POST",
       "path": "/v1/plugins/kyc/cases/{caseId}/decisions",
       "permission": "kyc.approve"
+    },
+    {
+      "id": "kyc.customer.create",
+      "method": "POST",
+      "path": "/v1/plugins/kyc/customers",
+      "permission": "org.onboard_child"
+    },
+    {
+      "id": "kyc.case.activation",
+      "method": "POST",
+      "path": "/v1/plugins/kyc/cases/{caseId}/activation",
+      "permission": "org.onboard_child"
     },
     {
       "id": "kyc.org.list",

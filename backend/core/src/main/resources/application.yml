@@ -18,6 +18,8 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration,classpath:db/seed/system
+    # Consolidated-away migrations stay in the install history (dev DBs) — missing files are intentional.
+    ignore-migration-patterns: "*:missing"
     placeholders:
       fspBootstrapPassword: ${FSP_BOOTSTRAP_PASSWORD:fsp-admin}
 
@@ -26,11 +28,27 @@ server:
 
 fsp:
   security:
-    internal-credential: ${FSP_INTERNAL_CREDENTIAL:dev-internal-credential}
+    internal-credential: ${FSP_INTERNAL_CREDENTIAL:}
+    # Outbound hop core→EMI carries EMI's secret (per-target credentials, red-team P0 fix)
+    emi-internal-credential: ${FSP_INTERNAL_CREDENTIAL_EMI:}
     default-person-password: ${FSP_PERSON_PASSWORD:fsp-person-2026}
   tigerbeetle:
     cluster-id: 0
     addresses: "127.0.0.1:3000"
+  idp:
+    # Core → IdP internal hop for admin-initiated password reset (credential-gated).
+    base-url: ${FSP_IDP_URL:http://localhost:8082}
+    internal-credential: ${FSP_INTERNAL_CREDENTIAL_IDP:}
+
+  act-as:
+    # plans/act-as-tenant-plan.md: "sudo into a tenant" — person-anchored, permission-gated
+    # (tenant.act_as), strictly-below only, audited (ACT_AS_START/END). Safe as a shipped
+    # default; switch off per environment if the operator wants it out.
+    enabled: true
+  orders:
+    # Stage 4 SKU money (plan §7.1): core → EMI internal hop (money hands). Same env var
+    # the gateway uses for its EMI catalog — one knob per environment.
+    emi-base-url: ${FSP_EMI_URL:http://localhost:8086}
 
 management:
   endpoints:

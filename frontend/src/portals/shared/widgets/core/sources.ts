@@ -31,10 +31,9 @@ export type DataSources = Record<string, SourceEntry>;
 export const SOURCES: DataSources = {
   'kyc.orgs.tree':   { '*': { method: 'GET', path: '/api/tenants/{tenantId}/children' } },
   'kyc.orgs.self':   { '*': { method: 'GET', path: '/api/tenants/{tenantId}' } },
-  'users.list':      { '*': { method: 'GET', path: '/api/tenants/{tenantId}/users' } },
+  'users.list':      { '*': { method: 'GET', path: '/api/tenants/{tenantId}/users', query: ['page', 'size', 'q', 'status', 'sort'] } },
+  'users.get':       { '*': { method: 'GET', path: '/api/tenants/{tenantId}/users/{personId}' } },
   'users.roles':     { '*': { method: 'GET', path: '/api/tenants/{tenantId}/user-roles' } },
-  'users.org':       { '*': { method: 'GET', path: '/api/tenants/{tenantId}' } },
-  'users.org.children': { '*': { method: 'GET', path: '/api/tenants/{tenantId}/children' } },
   'kyc.case.get':    { '*': { method: 'GET', path: '/api/tenants/{tenantId}/kyc' } },
   'kyc.tasks.get':   { '*': { method: 'GET', path: '/api/approvals?tenantId={tenantId}' } },
   'permissions.all': { '*': { method: 'GET', path: '/api/permissions' } },
@@ -47,7 +46,7 @@ export const SOURCES: DataSources = {
   'ledger.books':    { '*': { method: 'GET', path: '/api/tenants/{tenantId}/books' } },
   'periods.get':     { '*': { method: 'GET', path: '/api/tenants/{tenantId}/books' } },
   // KYC plugin (plans/plugin-platform-plan.md §12.4) — BFF /api/plugins/kyc → gateway /v1/plugins/kyc
-  'kyc.cases.page':  { '*': { method: 'GET', path: '/api/plugins/kyc/cases', query: ['page', 'size', 'q', 'status', 'risk', 'sort'] } },
+  'kyc.cases.page':  { '*': { method: 'GET', path: '/api/plugins/kyc/cases', query: ['page', 'size', 'q', 'status', 'risk', 'kind', 'sort'] } },
   'kyc.case.view':   { '*': { method: 'GET', path: '/api/plugins/kyc/cases/{caseId}' } },
   'kyc.case.history': { '*': { method: 'GET', path: '/api/plugins/kyc/cases/{caseId}/history', query: ['page', 'size'] } },
   'kyc.master.list': { '*': { method: 'GET', path: '/api/plugins/kyc/master-values', query: ['category'] } },
@@ -88,6 +87,8 @@ export const COMMANDS: DataSources = {
   'user.deactivate': { '*': { method: 'POST', path: '/api/tenants/{tenantId}/users/{personId}/deactivate' } },
   'user.activate':   { '*': { method: 'POST', path: '/api/tenants/{tenantId}/users/{personId}/activate' } },
   'user.remove':     { '*': { method: 'DELETE', path: '/api/tenants/{tenantId}/users/{personId}?expectedVersion={expectedVersion}' } },
+  'user.activation.resend': { '*': { method: 'POST', path: '/api/tenants/{tenantId}/users/{personId}/activation' } },
+  'user.password.reset.request': { '*': { method: 'POST', path: '/api/tenants/{tenantId}/users/{personId}/password-reset-request' } },
   'journal.submit': { '*': { method: 'POST', path: '/api/tenants/{tenantId}/journal-entries/{entryId}/submit-for-approval' } },
   // KYC plugin writes — every one carries an Idempotency-Key (web-core/api) and is never auto-retried
   'kyc.case.create': { '*': { method: 'POST', path: '/api/plugins/kyc/cases' } },

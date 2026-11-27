@@ -49,6 +49,42 @@ class ActorAssertionTest {
     }
 
     @Test
+    void carriesAnActAsSessionWhenThePersonActsAsATenant() {
+        Pair p = pair(1);
+        var acting = new ActorAssertion.Subject("11111111-1111-1111-1111-111111111111",
+            "33333333-3333-3333-3333-333333333333", "platform-admin", "fsp-bff",
+            "kyc.case.create", "org.onboard_child", "33333333-3333-3333-3333-333333333333", "corr-1",
+            "sess-1", "22222222-2222-2222-2222-222222222222");
+        String a = p.issuer().mint(acting, "plugin:kyc", "POST", "/v1/plugins/kyc/cases");
+        var v = p.verifier().verify(a, "plugin:kyc", "POST", "/v1/plugins/kyc/cases");
+        assertThat(v.acting()).isTrue();
+        assertThat(v.tenantId()).isEqualTo("33333333-3333-3333-3333-333333333333");
+        assertThat(v.actSessionId()).isEqualTo("sess-1");
+        assertThat(v.homeTenantId()).isEqualTo("22222222-2222-2222-2222-222222222222");
+    }
+
+    @Test
+    void anOrdinaryAssertionIsNotActing() {
+        Pair p = pair(1);
+        var v = p.verifier().verify(p.issuer().mint(subject(), "plugin:kyc", "POST", "/v1/plugins/kyc/cases"),
+            "plugin:kyc", "POST", "/v1/plugins/kyc/cases");
+        assertThat(v.acting()).isFalse();
+        assertThat(v.actSessionId()).isNull();
+        assertThat(v.homeTenantId()).isNull();
+    }
+
+    @Test
+    void anActClaimCannotBeAddedAfterSigning() {
+        Pair p = pair(1);
+        String a = p.issuer().mint(subject(), "plugin:kyc", "POST", "/v1/plugins/kyc/cases");
+        String[] parts = a.split("\\.");
+        String forged = new String(Base64.getUrlDecoder().decode(parts[1])).replaceFirst("\\{", "{\"act\":\"sess-x\",");
+        String tampered = parts[0] + "." + Base64.getUrlEncoder().withoutPadding().encodeToString(forged.getBytes()) + "." + parts[2];
+        assertThatThrownBy(() -> p.verifier().verify(tampered, "plugin:kyc", "POST", "/v1/plugins/kyc/cases"))
+            .hasMessageContaining("bad signature");
+    }
+
+    @Test
     void rejectsATamperedPayload() {
         Pair p = pair(1);
         String a = p.issuer().mint(subject(), "plugin:kyc", "POST", "/v1/plugins/kyc/cases");

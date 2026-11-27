@@ -62,7 +62,38 @@ public class KycCase {
     @Column(name = "checker_person_id")
     public UUID checkerPersonId;
 
-    @Column(nullable = false)
+    public static final String KIND_ORGANIZATION = "ORGANIZATION";
+    public static final String KIND_CUSTOMER = "CUSTOMER";
+
+    @Column(name = "case_kind", nullable = false)
+    public String caseKind = KIND_ORGANIZATION;
+
+    // ---- CUSTOMER cases (V2): the individual's KYC record; core holds only the person ----
+    @Column(name = "subject_person_id")
+    public UUID subjectPersonId;
+    @Column(name = "first_name")
+    public String firstName;
+    @Column(name = "last_name")
+    public String lastName;
+    public String gender;
+    @Column(name = "date_of_birth")
+    public LocalDate dateOfBirth;
+    public String phone;
+    public String email;
+    @Column(name = "primary_contact")
+    public String primaryContact;
+    /** Cache of core's persons.contact_verified_at (core stays the PDP on activation). */
+    @Column(name = "contact_verified_at")
+    public Instant contactVerifiedAt;
+    @Column(name = "activation_sent_at")
+    public Instant activationSentAt;
+
+    // ---- ORGANIZATION cases (V2): the org-born persons who activate by link/code ----
+    @Column(name = "admin_person_id")
+    public UUID adminPersonId;
+    @Column(name = "checker_person_id_subject")
+    public UUID subjectCheckerPersonId;
+
     public String subType;          // MANUFACTURER|DISTRIBUTOR|DEALER|WHOLESALER|MERCHANT
 
     @Column(name = "legal_name", nullable = false)
@@ -71,10 +102,10 @@ public class KycCase {
     @Column(name = "dba_name")
     public String dbaName;
 
-    @Column(name = "entity_type", nullable = false)
+    @Column(name = "entity_type")
     public String entityType;
 
-    @Column(name = "registration_number", nullable = false)
+    @Column(name = "registration_number")
     public String registrationNumber;
 
     @Column(name = "incorporation_date")

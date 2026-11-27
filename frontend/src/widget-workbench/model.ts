@@ -10,10 +10,10 @@ export const TIER_TEST_WIDTH: Record<Tier, number> = { xs: 390, sm: 768, md: 110
 export const TIER_LABEL: Record<Tier, string> = { xs: 'Phone', sm: 'Tablet', md: 'Laptop', lg: 'Desktop' };
 
 /** Business portals a widget can be previewed in (WidgetDef.contexts minus ANY). */
-export const PORTAL_CONTEXTS = ['PLATFORM', 'MANUFACTURER', 'DISTRIBUTOR', 'WHOLESALER'] as const;
+export const PORTAL_CONTEXTS = ['PLATFORM', 'MANUFACTURER', 'DISTRIBUTOR', 'WHOLESALER', 'MERCHANT'] as const;
 export type PortalContext = (typeof PORTAL_CONTEXTS)[number];
 
-/** Builder targets: the portal key layouts + signed bundles are published under (core). */
+/** Builder targets: the portal key layouts are published under (core). */
 export interface BuilderPortal {
   key: string;
   label: string;
@@ -26,6 +26,7 @@ export const BUILDER_PORTALS: readonly BuilderPortal[] = [
   { key: 'manufacturer', label: 'Manufacturer', context: 'MANUFACTURER', menuPortal: 'org' },
   { key: 'distributor', label: 'Distributor', context: 'DISTRIBUTOR', menuPortal: 'org' },
   { key: 'wholesaler', label: 'Wholesaler', context: 'WHOLESALER', menuPortal: 'org' },
+  { key: 'merchant', label: 'Merchant', context: 'MERCHANT', menuPortal: 'org' },
 ];
 
 /** Fixture org used when the URL names none and access is not the signed-in user's. */
@@ -79,4 +80,39 @@ export function registration(def: WidgetDef) {
     requires: requiresRows(def),
     bundleSha256: null,
   };
+}
+
+/** Registry ordering: as the build lists them, or by when core first registered (created) them. */
+export type RegistryOrder = 'build' | 'created-desc' | 'created-asc';
+export const REGISTRY_ORDERS: readonly { value: RegistryOrder; label: string }[] = [
+  { value: 'build', label: 'Build order' },
+  { value: 'created-desc', label: 'Newest created first' },
+  { value: 'created-asc', label: 'Oldest created first' },
+];
+
+/**
+ * Sorts rows by creation time (core's first registration, `createdAt`). A row core does not
+ * hold yet has no creation time: it is the newest thing there is (just built, registration
+ * pending), so it leads "newest first" and trails "oldest first". Ties keep id order.
+ */
+export function sortByCreated<T extends { id: string }>(
+  rows: readonly T[], order: RegistryOrder, createdOf: (row: T) => string | null | undefined,
+): T[] {
+  if (order === 'build') return [...rows];
+  const dir = order === 'created-desc' ? -1 : 1;
+  const time = (r: T) => {
+    const c = createdOf(r);
+    const t = c ? Date.parse(c) : NaN;
+    return Number.isNaN(t) ? null : t;
+  };
+  return [...rows].sort((a, b) => {
+    const ta = time(a);
+    const tb = time(b);
+    if (ta === null || tb === null) {
+      if (ta === tb) return a.id.localeCompare(b.id);
+      // unregistered = newest: first when newest-first, last when oldest-first
+      return (ta === null ? -1 : 1) * (dir === -1 ? 1 : -1);
+    }
+    return ta === tb ? a.id.localeCompare(b.id) : (ta - tb) * dir;
+  });
 }

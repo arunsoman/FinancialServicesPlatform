@@ -34,13 +34,16 @@ public class TenantVerificationService {
     private final TenantRepository tenants;
     private final AuditService audit;
     private final OutboxService outbox;
+    private final com.fsp.core.ledger.LedgerService ledger;
 
     public TenantVerificationService(ApprovalService approvals, TenantRepository tenants,
-                                     AuditService audit, OutboxService outbox) {
+                                     AuditService audit, OutboxService outbox,
+                                     com.fsp.core.ledger.LedgerService ledger) {
         this.approvals = approvals;
         this.tenants = tenants;
         this.audit = audit;
         this.outbox = outbox;
+        this.ledger = ledger;
     }
 
     public enum Verdict { VERIFIED, REJECTED }
@@ -159,9 +162,9 @@ public class TenantVerificationService {
         tenant.verificationStatus = "VERIFIED";
         tenant.activatedBy = checkerId;
         tenants.save(tenant);
-        // Books are already created (SUSPENDED) by onboarding; they get ACTIVATED by the
-        // KycActivationService.activate path during the approval resolve. Here we just
-        // ensure the tenant is ACTIVE.
+        // The tenant was born with SUSPENDED books (TenantChildrenService); the verdict
+        // opens them (docs §7.3: "the book auto-opens on verdict").
+        ledger.openBooksForTenant(tenant.id);
         audit.record(null, checkerId, tenant.id, null,
             "TENANT_ACTIVATED_BY_VERIFICATION", "TENANT", tenant.id.toString(),
             null, audit.hashState("status=PENDING;verification=VERIFIED"), false);

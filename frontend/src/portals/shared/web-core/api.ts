@@ -3,6 +3,11 @@
  * every call goes through the same-origin BFF — cookie session, CSRF double-submit,
  * token stays server-side (FAPI2 UI mandate). Never fetch, never cookies:false.
  */
+import { holdWhile } from './submit-guard';
+
+/** Fired on window when the BFF says the session is gone (NO_SESSION / SESSION_EXPIRED). */
+export const SESSION_ENDED_EVENT = 'fsp:session-ended';
+
 export interface ApiProblem {
   status: number;
   code?: string;
@@ -58,7 +63,16 @@ interface ApiOpts {
    * logical action; omitted → a fresh UUIDv4 per call.
    */
   idempotencyKey?: string;
+  /**
+   * Default true for mutations: an identical mutation (method + path + body) already on the
+   * wire is JOINED instead of re-sent, so a double-fire never reaches the server twice.
+   * Pass false only when two identical concurrent writes are genuinely intended.
+   */
+  dedupe?: boolean;
 }
+
+/** In-flight mutations keyed by method + path + body (submit-guard layer 3). */
+const inflightMutations = new Map<string, Promise<unknown>>();
 
 function newIdempotencyKey(): string {
   return crypto.randomUUID();
@@ -68,8 +82,24 @@ function newIdempotencyKey(): string {
  * Same-origin BFF call. `/api/...` rides BffProxyController → gateway → core;
  * `/bff/...` are the session-control endpoints. 401 → `AuthRequiredError`.
  */
-export async function api<T>(path: string, opts: ApiOpts = {}): Promise<T> {
+export function api<T>(path: string, opts: ApiOpts = {}): Promise<T> {
   const method = opts.method ?? 'GET';
+  if (method === 'GET') return send<T>(path, method, opts);
+  const key = opts.dedupe === false
+    ? null
+    : `${method} ${path} ${opts.body === undefined ? '' : JSON.stringify(opts.body)}`;
+  const joined = key ? inflightMutations.get(key) : undefined;
+  if (joined) return joined as Promise<T>;
+  const p = holdWhile(send<T>(path, method, opts));
+  if (key) {
+    inflightMutations.set(key, p);
+    const clear = () => { if (inflightMutations.get(key) === p) inflightMutations.delete(key); };
+    p.then(clear, clear);
+  }
+  return p;
+}
+
+async function send<T>(path: string, method: HttpMethod, opts: ApiOpts): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/problem+json, application/json' };
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET') {
@@ -85,7 +115,16 @@ export async function api<T>(path: string, opts: ApiOpts = {}): Promise<T> {
   }).catch(() => {
     throw new ApiError({ status: 0, title: 'Network error', detail: 'BFF unreachable' });
   });
-  if (r.status === 401) throw new ApiError({ status: 401, code: 'AUTH_REQUIRED', title: 'Not authenticated', detail: 'session required' });
+  if (r.status === 401) {
+    // The BFF's own "no/ended session" answers end the session for the WHOLE page — the shell
+    // sends the person to sign-in instead of every widget showing an error. Other 401s (an
+    // act-as row that expired, a plugin hiccup) are the caller's to handle.
+    const pd = (await r.json().catch(() => null)) as { code?: string } | null;
+    if (pd?.code === 'NO_SESSION' || pd?.code === 'SESSION_EXPIRED') {
+      window.dispatchEvent(new CustomEvent(SESSION_ENDED_EVENT, { detail: pd.code }));
+    }
+    throw new ApiError({ status: 401, code: 'AUTH_REQUIRED', title: 'Not authenticated', detail: 'session required' });
+  }
   if (r.status === 403) {
     // ui-std §5.2: a denial names WHAT was denied — keep the server's detail + code when present
     const pd = (await r.json().catch(() => null)) as { code?: string; detail?: string } | null;
@@ -108,7 +147,11 @@ export async function api<T>(path: string, opts: ApiOpts = {}): Promise<T> {
     });
   }
   if (r.status === 204) return undefined as T;
-  return (await r.json()) as T;
+  const text = await r.text();
+  // Void core handlers (e.g. four-eyes approve/reject) answer 200 with an EMPTY body —
+  // r.json() would throw SyntaxError and turn a successful decision into a failed mutation.
+  if (!text.length) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export const apiGet = <T,>(path: string) => api<T>(path, { method: 'GET' });

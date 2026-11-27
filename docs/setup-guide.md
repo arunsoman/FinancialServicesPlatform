@@ -250,7 +250,19 @@ flowchart LR
 | kyc plugin | `cd backend/plugins/kyc && ../../gradlew bootRun` | `..\..\gradlew.bat bootRun` |
 
 One terminal per service. Each terminal wants the same env so defaults work:
-`FSP_BOOTSTRAP_PASSWORD=fsp-admin` (dev-only default), `FSP_INTERNAL_CREDENTIAL=dev-internal-credential`.
+`FSP_BOOTSTRAP_PASSWORD=fsp-admin` (dev-only default). The internal hop uses **per-target
+credentials** (no shared god-key — red-team hardening): generate one secret per service
+(`openssl rand -hex 24`) and set the matching env when booting each side of a hop:
+
+| Env variable | Holds the inbound secret of | Who must carry it outbound |
+|---|---|---|
+| `FSP_INTERNAL_CREDENTIAL` | core | gateway + recon-worker (as `FSP_INTERNAL_CREDENTIAL_CORE`) |
+| `FSP_INTERNAL_CREDENTIAL_EMI` | emi | core (core→EMI money hop), gateway (`/v1/emi/**`), recon-worker |
+| `FSP_INTERNAL_CREDENTIAL_PSP` | psp | gateway (`/v1/psp/**`), recon-worker |
+| `FSP_INTERNAL_CREDENTIAL_IDP` | idp | gateway (`/idp/policy/**` hop) |
+
+If a service's variable is unset, its internal plane is **fail-closed** (`INTERNAL_PLANE_CLOSED`
+/ 401) — never open.
 
 ### 5.1 Who you can log in as — **default dev credentials**
 
@@ -296,7 +308,7 @@ are initialized with `fsp.security.default-person-password` — env
 | What | Default | Where set |
 |---|---|---|
 | Postgres user / password | `fsp` / `fsp` (plugin container DB: `fsp_plugin_kyc` / `fsp_plugin_kyc`) | `infrastructure/docker-compose.yml` |
-| Internal hop credential | `dev-internal-credential` | env `FSP_INTERNAL_CREDENTIAL` (gateway + core + idp + bff must match) |
+| Internal hop credentials (per target) | none — must be injected | `FSP_INTERNAL_CREDENTIAL` (core), `FSP_INTERNAL_CREDENTIAL_EMI`, `FSP_INTERNAL_CREDENTIAL_PSP`, `FSP_INTERNAL_CREDENTIAL_IDP`; callers carry the matching per-target secret (table §5). Unset = fail-closed |
 | TLS identity password | `fsp-dev` | env `FSP_TLS_PASSWORD` (`make pki`) |
 | IdP key pin | — | signing key is a mounted file, not a password |
 
@@ -307,7 +319,8 @@ are initialized with `fsp.security.default-person-password` — env
 Successful boot lines to watch for:
 
 ```text
-core:    Flyway ... migrations applied (V1..V16)   → Tomcat started on 8081
+core:    Flyway ... migrations applied (V1..V32)   → Tomcat started on 8081
+emi:     emi descriptor live (catalog digest ...)   → Tomcat started on 8086
 idp:     idp JWKS available ...                    → Tomcat started on 8082
 gateway: catalog fetched (N operations)            → started on 8090  (boot FAILS if core unreachable — retry loop)
 bff:     Tomcat started on 8080
@@ -345,7 +358,13 @@ fixes):
 L1  engine:            podman machine list | docker ps          → running
 L2  postgres:          5432 open, compose ps → healthy
 L3  tigerbeetle:       3000 open; log clean (container logs / server.log)
-L4  core:              boot shows Flyway V16 applied; :8081 open
+L4  core:              boot shows Flyway V32 applied; :8081 open
+L4b emi:                GET :8086/internal/ops/catalog → descriptor JSON (13 ops)
+L4c psp:                GET :8085/internal/ops/catalog → descriptor JSON (13 ops);
+                        demo money lane: run psp with `--spring.profiles.active=demo-psp`
+                        (onboards DEMO-BANK connector + demo merchant, authorize → capture;
+                        `--psp-demo-sweep` sweeps a closed cycle — verify log line
+                        `psp_sweep_clearing_zero … zeroed_invariant=OK`)
 L5  idp:               GET http://127.0.0.1:8082/idp/jwks → key set JSON
 L6  gateway:           GET http://127.0.0.1:8090/v1/** with token → NOT 404 ROUTE_NOT_IN_CATALOG
 L7  bff chain:         GET :8080/bff/csrf → POST :8080/bff/auth/login (platform-admin/fsp-admin)
@@ -461,6 +480,8 @@ Each row: symptom → root cause → fix. Rung references point to §7's ladder.
 |---|---|
 | core boot: Flyway `validate failed` after you *edited* an applied migration | migrations are immutable (AGENTS §2) → `git checkout -- <file>`; if truly needed, new V-file |
 | Flyway `V17 already exists` conflict in team PRs | numbering collision → rebase and renumber to next free (checked by `make docs-check`) |
+| Flyway `Detected applied migration not resolved locally: N` | an applied migration was consolidated away — dev DBs keep the history row; config already sets `ignore-migration-patterns: "*:missing"` (never `*:all`), so this is the cue to check whether the deletion was intentional |
+| core→EMI hop fails `EMI_CURRENCY_UNSUPPORTED`/`ECONNREFUSED :8086` | emi not running or `FSP_EMI_URL` (core, default `http://localhost:8086`) points elsewhere → §4/§5 start order |
 | `password authentication failed for user fsp` | compose env vs core env drift → both default `fsp/fsp`; if you changed compose env, change core datasource env too |
 | demo login (`psp-admin/demo1234`) 404/no user | demo seed only loads under `client-demo` profile → run core with `--spring.profiles.active=client-demo` (§8) |
 | demo login fails on a *system-seeded* DB that later got `client-demo` | `client-demo` adds rows; if it was never run, run once with the profile ON the existing volume — it's additive |
@@ -472,12 +493,14 @@ Each row: symptom → root cause → fix. Rung references point to §7's ladder.
 | Symptom | Cause → Fix |
 |---|---|
 | gateway fails boot: "catalog unreachable" | core not up yet / wrong `FSP_CORE_URL` → start order §5; gateway retries then exits — restart it after core is green |
+| emi `/v1/emi/**` answers 401 `UNTRUSTED Origin` | the request did not pass the gateway (direct-to-8086 access) or the gateway's `FSP_INTERNAL_CREDENTIAL_EMI` differs from emi's env of the same name (per-target credential, §5) |
+| emi `/v1/emi/**` answers 403 `ACTOR_TYPE_REJECTED` | a client-credential (machine) token was used — EMI self-service ops are person-plane only |
 | gateway: `404 ROUTE_NOT_IN_CATALOG` on a route you *just added* | new `@FspOperation` not yet in the descriptor the gateway watches → restart core (boot gate re-inventories); gateway refreshes within 60 s |
 | `401 IDEMPOTENCY_KEY_REQUIRED` on a POST from curl | every `/v1` mutation needs the header (AGENTS §2e) → add e.g. `-H 'Idempotency-Key: 55b1…-v4'`; BFF forwards SPA's key automatically |
 | `403 MAKER_CANNOT_APPROVE` approving your own JE | **that's the invariant working** (four-eyes) → use a second admin; in UI it renders an explicit blocked state |
 | `409 IDEMPOTENCY_IN_PROGRESS` | same key re-sent while original pending → wait 1 s (Retry-After) or send a fresh key |
 | login fails `NO_SESSION` at BFF | CSRF missing on POST → call `GET /bff/csrf` first, send `XSRF-TOKEN` cookie + matching header |
-| IdP logs `bad internal credential` | `FSP_INTERNAL_CREDENTIAL` differs between callers → same value for gateway/core/idp (`dev-internal-credential` default) |
+| IdP logs `bad internal credential` | the gateway's `FSP_INTERNAL_CREDENTIAL_IDP` differs from the IdP's env of the same name (per-target credential, §5) |
 | gateway logs `token verification failed` | clock skew / wrong issuer → check `FSP_IDP_ISSUER` identical on idp+gateway (default `https://idp.fsp.local`) |
 
 ### 11.6 Frontend (L8)
@@ -488,6 +511,7 @@ Each row: symptom → root cause → fix. Rung references point to §7's ladder.
 | browser stuck on "loading" overview | session hydration chain hit `AUTH_REQUIRED` → IdP token expired (15 min) → reload to bounce to login |
 | `B AUTH_REQUIRED` loop | cookie blocked (third-party policy) → use `http://localhost:5173` not a LAN IP; SameSite=Lax needs same-site nav |
 | Playwright e2e flaky on cold start | services still booting → wait for smoke ladder L7 green before `bunx --bun playwright test` |
+| portal shows **"No menu configured"** or **"Couldn’t load the … menus"** | core hasn't applied the menu seed yet, or core/gateway/BFF is down | restart core; bring the stack up; see [`docs/widget-workflow.md`](widget-workflow.md#fixing-menu-problems) |
 | typecheck fails on generated widget types | widget sync drift → `bun run widgets:check` (syncs against core catalog) |
 
 ### 11.7 Windows-only extras

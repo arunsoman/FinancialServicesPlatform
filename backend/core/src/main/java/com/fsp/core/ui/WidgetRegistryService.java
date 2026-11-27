@@ -30,14 +30,12 @@ public class WidgetRegistryService {
     private final UiWidgetRepository widgets;
     private final PermissionRepository permissions;
     private final PermissionService permissionService;
-    private final UiBundleService bundles;
 
     public WidgetRegistryService(UiWidgetRepository widgets, PermissionRepository permissions,
-                                 PermissionService permissionService, UiBundleService bundles) {
+                                 PermissionService permissionService) {
         this.widgets = widgets;
         this.permissions = permissions;
         this.permissionService = permissionService;
-        this.bundles = bundles;
     }
 
     @Transactional
@@ -89,8 +87,6 @@ public class WidgetRegistryService {
         widgets.save(row);
         log.info("ui_widget_registered widget={} version={} requires={} bundleSha256={} by={}",
             row.id, row.version, requires, row.bundleSha256, actor.username());
-        // Widget catalog changed → affected portals' bundles are re-signed (same tx as the upsert).
-        bundles.regenerateForWidgets(portals);
         return row;
     }
 
